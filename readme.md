@@ -10,6 +10,9 @@
 - 标题与摘要会优先从页面正文容器中解析，已内置常见主题选择器（含 OneBlog 的 `#post_content/.post_content`）
 - 若页面含 `og:title`/`twitter:title` 也会作为回退使用
 
+### 样式有两种（如图所示）
+
+
 ### 依赖
 - html2canvas（截图转图片）
 - qrcode.js（生成二维码）
