@@ -11,9 +11,14 @@
 - 若页面含 `og:title`/`twitter:title` 也会作为回退使用
 
 ### 样式有两种（如图所示）
-
+![预览](https://github.com/SurGarfield/TEPoster/blob/main/Rendering/1.jpg)
 
 ### 依赖
 - html2canvas（截图转图片）
 - qrcode.js（生成二维码）
 > 插件默认使用 CDN，加载失败会自动回退到本地文件
+
+
+### 如果喜欢可以打赏我哦~
+
+![打赏](https://github.com/SurGarfield/TEPoster/blob/main/Rendering/wechat_reward.webp)
