@@ -12,8 +12,6 @@
 
 ### 样式有两种（如图所示）
 
-![默认](https://github.com/SurGarfield/TEPoster/blob/main/Rendering/1.png)
-![nicetheme](https://github.com/SurGarfield/TEPoster/blob/main/Rendering/1.png)
 
 ### 依赖
 - html2canvas（截图转图片）
