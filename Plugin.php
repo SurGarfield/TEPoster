@@ -191,9 +191,9 @@ class TEPoster_Plugin implements Typecho_Plugin_Interface
 		echo '<div class="teposter-button-wrap"><button type="button" class="' . htmlspecialchars($buttonClass) . '" id="teposter-generate">' . _t('海报') . '</button></div>' . "\n";
 	}
 
-	public static function footer()
+	public static function footer($archive = null)
 	{
-		$widget = Typecho_Widget::widget('Widget_Archive');
+		$widget = ($archive instanceof Widget_Archive) ? $archive : Typecho_Widget::widget('Widget_Archive');
 		$isSingle = $widget->is('single');
 
 		$options = Helper::options();
@@ -254,7 +254,7 @@ class TEPoster_Plugin implements Typecho_Plugin_Interface
 		$bootstrapFallback = "(function(){function f(){if(typeof QRCode==='undefined'){var s=document.createElement('script');s.src='" . $qrLocal . "';document.head.appendChild(s);}if(typeof html2canvas==='undefined'){var s2=document.createElement('script');s2.src='" . $h2cLocal . "';document.head.appendChild(s2);}}if(document.readyState==='complete'){setTimeout(f,300);}else{window.addEventListener('load',function(){setTimeout(f,300);});}})();";
 		echo '<script>' . $bootstrapFallback . '</script>' . "\n";
 
-		echo '<script>window.TEPosterConfig = ' . json_encode($cfg, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . ';</script>' . "\n";
+		echo '<script>window.TEPosterConfig = ' . json_encode($cfg, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) . ';</script>' . "\n";
 		echo '<script src="' . $cfg['assetsBase'] . '/teposter.js?v=8"></script>' . "\n";
 	}
 }
