@@ -7,7 +7,7 @@ if (!defined('__TYPECHO_ROOT_DIR__')) {
  * 文章页生成海报，调用：TEPoster_Plugin::insertButton()
  * @package TEPoster
  * @author 森木志
- * @version 1.1.2
+ * @version 1.2.0
  * @link https://oxxx.cn
  *
  */
@@ -104,6 +104,18 @@ class TEPoster_Plugin implements Typecho_Plugin_Interface
 		);
 		$form->addInput($summaryLength);
 
+		$assetSource = new Typecho_Widget_Helper_Form_Element_Radio(
+			'assetSource',
+			[
+				'local' => _t('本地内置（推荐）'),
+				'cdn' => _t('外部 CDN（使用下方地址）')
+			],
+			'local',
+			_t('依赖加载方式'),
+			_t('选择二维码与海报生成脚本的加载来源。')
+		);
+		$form->addInput($assetSource);
+
 		$cdnHtml2canvasUrl = new Typecho_Widget_Helper_Form_Element_Text(
 			'cdnHtml2canvasUrl', null, 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js', _t('html2canvas 地址'), _t('可使用 CDN 或本地文件地址。')
 		);
@@ -125,6 +137,7 @@ class TEPoster_Plugin implements Typecho_Plugin_Interface
 			$buttonClass->container->setAttribute('data-teposter-group', 'general');
 			$posterWidth->container->setAttribute('data-teposter-group', 'general');
 			$summaryLength->container->setAttribute('data-teposter-group', 'general');
+			$assetSource->container->setAttribute('data-teposter-group', 'general');
 			$cdnHtml2canvasUrl->container->setAttribute('data-teposter-group', 'general');
 			$cdnQrcodeUrl->container->setAttribute('data-teposter-group', 'general');
 			$customCss->container->setAttribute('data-teposter-group', 'general');
@@ -169,10 +182,12 @@ class TEPoster_Plugin implements Typecho_Plugin_Interface
 			$customCoverField->container->setAttribute('data-teposter-show-when', 'source:thumb');
 			$unsplashAccessKey->container->setAttribute('data-teposter-show-when', 'source:unsplash');
 			$unsplashKeywords->container->setAttribute('data-teposter-show-when', 'source:unsplash');
+			$cdnHtml2canvasUrl->container->setAttribute('data-teposter-show-when', 'asset:cdn');
+			$cdnQrcodeUrl->container->setAttribute('data-teposter-show-when', 'asset:cdn');
 		} catch (\Throwable $e) {}
 
 		// 注入控制显隐脚本（通用设置折叠 + 条件展开）
-		echo '<script>(function(){function sh(){var s=(document.querySelector("input[name=posterStyle]:checked")||{}).value||"default";var src=(document.querySelector("input[name=imageSource]:checked")||{}).value||"default";document.querySelectorAll("[data-teposter-show-when]").forEach(function(el){var v=el.getAttribute("data-teposter-show-when");if(!v)return;var ok=false;v.split(" ").forEach(function(rule){var p=rule.split(":");if(p[0]==="style"&&p[1]===s)ok=true; if(p[0]==="source"&&p[1]===src)ok=true;});el.style.display=ok?"":"none";});}function initGeneral(){var t=document.getElementById("teposter-general-toggle");var list=[].slice.call(document.querySelectorAll("[data-teposter-group=general]"));if(!t||!list.length)return;var opened=false;function apply(){list.forEach(function(el){el.style.display=opened?"":"none";});var imgSrc=document.querySelector("#typecho-option-item-imageSource-"),ref=imgSrc&&imgSrc.parentNode; if(ref&&opened){ var g=document.querySelector("[data-teposter-group=general]"); if(g){ ref.insertBefore(g.parentNode, imgSrc); } } }t.addEventListener("click",function(){opened=!opened;apply();});apply();}document.addEventListener("change",function(e){if(e.target&&e.target.name&&(e.target.name==="posterStyle"||e.target.name==="imageSource")){sh();}});if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",function(){sh();initGeneral();});}else{sh();initGeneral();}})();</script>' . "\n";
+		echo '<script>(function(){function sh(){var s=(document.querySelector("input[name=posterStyle]:checked")||{}).value||"default";var src=(document.querySelector("input[name=imageSource]:checked")||{}).value||"default";var asset=(document.querySelector("input[name=assetSource]:checked")||{}).value||"local";document.querySelectorAll("[data-teposter-show-when]").forEach(function(el){var v=el.getAttribute("data-teposter-show-when");if(!v)return;var ok=false;v.split(" ").forEach(function(rule){var p=rule.split(":");if(p.length<2)return;if(p[0]==="style"&&p[1]===s)ok=true; if(p[0]==="source"&&p[1]===src)ok=true; if(p[0]==="asset"&&p[1]===asset)ok=true;});el.style.display=ok?"":"none";});}function initGeneral(){var t=document.getElementById("teposter-general-toggle");var list=[].slice.call(document.querySelectorAll("[data-teposter-group=general]"));if(!t||!list.length)return;var opened=false;function apply(){list.forEach(function(el){el.style.display=opened?"":"none";});var imgSrc=document.querySelector("#typecho-option-item-imageSource-"),ref=imgSrc&&imgSrc.parentNode; if(ref&&opened){ var g=document.querySelector("[data-teposter-group=general]"); if(g){ ref.insertBefore(g.parentNode, imgSrc); } } }t.addEventListener("click",function(){opened=!opened;apply();});apply();}document.addEventListener("change",function(e){if(e.target&&e.target.name&&(e.target.name==="posterStyle"||e.target.name==="imageSource"||e.target.name==="assetSource")){sh();}});if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",function(){sh();initGeneral();});}else{sh();initGeneral();}})();</script>' . "\n";
 	}
 
 
@@ -203,17 +218,38 @@ class TEPoster_Plugin implements Typecho_Plugin_Interface
 		$postCustomCover = '';
 		if ($isSingle) {
 			try {
+				$fieldCandidates = [];
 				if (!empty($pluginOptions->customCoverField)) {
-					$fieldName = (string)$pluginOptions->customCoverField;
-					if (isset($widget->fields) && $widget->fields) {
+					$fieldCandidates[] = (string)$pluginOptions->customCoverField;
+				}
+				$fieldCandidates = array_merge($fieldCandidates, [
+					'bannerUrl',
+					'bannerurl',
+					'banner',
+					'cover',
+					'coverUrl',
+					'coverurl',
+					'thumb',
+					'thumbnail'
+				]);
+				$fieldCandidates = array_values(array_unique(array_filter($fieldCandidates)));
+				if (isset($widget->fields) && $widget->fields) {
+					foreach ($fieldCandidates as $fieldName) {
 						if (isset($widget->fields->{$fieldName}) && !empty($widget->fields->{$fieldName})) {
 							$postCustomCover = (string)$widget->fields->{$fieldName};
+							break;
 						}
 					}
 				}
-			} catch (Exception $e) {
+			} catch (\Throwable $e) {
 			}
 		}
+
+		$assetSource = !empty($pluginOptions->assetSource) ? (string)$pluginOptions->assetSource : 'local';
+		$cdnHtml2canvasUrl = !empty($pluginOptions->cdnHtml2canvasUrl) ? (string)$pluginOptions->cdnHtml2canvasUrl : 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
+		$cdnQrcodeUrl = !empty($pluginOptions->cdnQrcodeUrl) ? (string)$pluginOptions->cdnQrcodeUrl : 'https://cdn.jsdelivr.net/npm/qrcodejs2@0.0.2/qrcode.min.js';
+		$localHtml2canvasUrl = $pluginUrl . '/assets/vendor/html2canvas.min.js';
+		$localQrcodeUrl = $pluginUrl . '/assets/vendor/qrcode.min.js';
 
 		$cfg = [
 			'buttonClass' => !empty($pluginOptions->buttonClass) ? (string)$pluginOptions->buttonClass : 'teposter-btn',
@@ -234,10 +270,11 @@ class TEPoster_Plugin implements Typecho_Plugin_Interface
 			'ntBrandDesc' => !empty($pluginOptions->ntBrandDesc) ? (string)$pluginOptions->ntBrandDesc : '',
 			'assetsBase' => $pluginUrl . '/assets',
 			'defaultImage' => !empty($pluginOptions->defaultImageUrl) ? (string)$pluginOptions->defaultImageUrl : ($pluginUrl . '/assets/poster.webp'),
-			'cdnHtml2canvasUrl' => !empty($pluginOptions->cdnHtml2canvasUrl) ? (string)$pluginOptions->cdnHtml2canvasUrl : 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js',
-			'cdnQrcodeUrl' => !empty($pluginOptions->cdnQrcodeUrl) ? (string)$pluginOptions->cdnQrcodeUrl : 'https://cdn.jsdelivr.net/npm/qrcodejs2@0.0.2/qrcode.min.js',
-			'localHtml2canvasUrl' => $pluginUrl . '/assets/vendor/html2canvas.min.js',
-			'localQrcodeUrl' => $pluginUrl . '/assets/vendor/qrcode.min.js',
+			'cdnHtml2canvasUrl' => $cdnHtml2canvasUrl,
+			'cdnQrcodeUrl' => $cdnQrcodeUrl,
+			'localHtml2canvasUrl' => $localHtml2canvasUrl,
+			'localQrcodeUrl' => $localQrcodeUrl,
+			'assetSource' => $assetSource,
 		];
 
 		echo '<link rel="stylesheet" href="' . $cfg['assetsBase'] . '/teposter.css?v=9" />' . "\n";
@@ -245,13 +282,20 @@ class TEPoster_Plugin implements Typecho_Plugin_Interface
 			echo '<style id="teposter-custom-css">' . $pluginOptions->customCss . '</style>' . "\n";
 		}
 
-		$qrCdn = htmlspecialchars($cfg['cdnQrcodeUrl']);
-		$qrLocal = $cfg['localQrcodeUrl'];
-		$h2cCdn = htmlspecialchars($cfg['cdnHtml2canvasUrl']);
-		$h2cLocal = $cfg['localHtml2canvasUrl'];
-		echo '<script src="' . $qrCdn . '" onerror="(function(){var s=document.createElement(\'script\');s.src=\'' . $qrLocal . '\';document.head.appendChild(s);})();"></script>' . "\n";
-		echo '<script src="' . $h2cCdn . '" onerror="(function(){var s=document.createElement(\'script\');s.src=\'' . $h2cLocal . '\';document.head.appendChild(s);})();"></script>' . "\n";
-		$bootstrapFallback = "(function(){function f(){if(typeof QRCode==='undefined'){var s=document.createElement('script');s.src='" . $qrLocal . "';document.head.appendChild(s);}if(typeof html2canvas==='undefined'){var s2=document.createElement('script');s2.src='" . $h2cLocal . "';document.head.appendChild(s2);}}if(document.readyState==='complete'){setTimeout(f,300);}else{window.addEventListener('load',function(){setTimeout(f,300);});}})();";
+		$qrLocalRaw = $cfg['localQrcodeUrl'];
+		$h2cLocalRaw = $cfg['localHtml2canvasUrl'];
+		$qrLocal = htmlspecialchars($qrLocalRaw);
+		$h2cLocal = htmlspecialchars($h2cLocalRaw);
+		if ($assetSource === 'cdn') {
+			$qrCdn = htmlspecialchars($cfg['cdnQrcodeUrl']);
+			$h2cCdn = htmlspecialchars($cfg['cdnHtml2canvasUrl']);
+			echo '<script src="' . $qrCdn . '" onerror="(function(){var s=document.createElement(\'script\');s.src=\'' . $qrLocalRaw . '\';document.head.appendChild(s);})();"></script>' . "\n";
+			echo '<script src="' . $h2cCdn . '" onerror="(function(){var s=document.createElement(\'script\');s.src=\'' . $h2cLocalRaw . '\';document.head.appendChild(s);})();"></script>' . "\n";
+		} else {
+			echo '<script src="' . $qrLocal . '"></script>' . "\n";
+			echo '<script src="' . $h2cLocal . '"></script>' . "\n";
+		}
+		$bootstrapFallback = "(function(){function f(){if(typeof QRCode==='undefined'){var s=document.createElement('script');s.src='" . addslashes($assetSource === 'cdn' ? $cfg['cdnQrcodeUrl'] : $qrLocalRaw) . "';document.head.appendChild(s);}if(typeof html2canvas==='undefined'){var s2=document.createElement('script');s2.src='" . addslashes($assetSource === 'cdn' ? $cfg['cdnHtml2canvasUrl'] : $h2cLocalRaw) . "';document.head.appendChild(s2);}}if(document.readyState==='complete'){setTimeout(f,300);}else{window.addEventListener('load',function(){setTimeout(f,300);});}})();";
 		echo '<script>' . $bootstrapFallback . '</script>' . "\n";
 
 		echo '<script>window.TEPosterConfig = ' . json_encode($cfg, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) . ';</script>' . "\n";

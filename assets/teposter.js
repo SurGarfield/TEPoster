@@ -178,12 +178,103 @@
     return /(logo|icon|avatar|emoji|sprite|placeholder)\/|\.(svg)$/i.test(u);
   }
 
+  function normalizeUrlMaybe(url) {
+    if (!url) return '';
+    var str = String(url).trim();
+    if (!str) return '';
+    try { return new URL(str, location.href).href; } catch(_) {}
+    return str;
+  }
+
+  function resolveImgCandidate(img) {
+    if (!img) return '';
+    var attrOrder = [
+      'src',
+      'data-src',
+      'data-original',
+      'data-original-src',
+      'data-lazy',
+      'data-lazy-src',
+      'data-url',
+      'data-image',
+      'data-img',
+      'data-full',
+      'data-preview',
+      'data-zoom',
+      'data-zoom-img',
+      'data-large',
+      'data-origin',
+      'data-bg',
+      'data-echo'
+    ];
+    for (var i = 0; i < attrOrder.length; i++) {
+      var val = img.getAttribute(attrOrder[i]);
+      if (val && val.trim()) return val;
+    }
+    try {
+      if (img.dataset) {
+        var datasetPriority = ['src', 'original', 'originalSrc', 'lazy', 'lazySrc', 'url', 'image', 'img', 'full', 'preview', 'zoom', 'zoomImg', 'large', 'origin', 'bg', 'echo'];
+        for (var j = 0; j < datasetPriority.length; j++) {
+          var key = datasetPriority[j];
+          if (typeof img.dataset[key] === 'string' && img.dataset[key]) {
+            return img.dataset[key];
+          }
+        }
+        for (var k in img.dataset) {
+          if (Object.prototype.hasOwnProperty.call(img.dataset, k) && typeof img.dataset[k] === 'string' && img.dataset[k]) {
+            return img.dataset[k];
+          }
+        }
+      }
+    } catch (_) {}
+    if (img.currentSrc) return img.currentSrc;
+    var srcset = img.getAttribute('srcset');
+    if (!srcset && img.dataset) {
+      srcset = img.dataset.srcset || img.dataset.srcSet;
+    }
+    if (srcset && srcset.trim()) {
+      var firstItem = srcset.split(',')[0];
+      if (firstItem) {
+        var parts = firstItem.trim().split(/\s+/);
+        if (parts.length > 0 && parts[0]) {
+          return parts[0];
+        }
+      }
+    }
+    return '';
+  }
+
   function findFirstContentImage() {
-    var list = document.querySelectorAll('#content .post .post-content img, article .post-content img, .entry-content img, .article-content img');
+    var selectors = [
+      '#post-content img',
+      '#content .post .post-content img',
+      'article .post-content img',
+      'article img',
+      '.post img',
+      '.post-content img',
+      '.entry-content img',
+      '.article-content img',
+      '.content img',
+      '.markdown-body img',
+      '.typo img',
+      '.rich-media img',
+      '.rich-content img',
+      '.article img',
+      '.blog-post img',
+      '.post-body img',
+      '.post__content img'
+    ];
+    var list;
+    try {
+      list = document.querySelectorAll(selectors.join(', '));
+    } catch (_) {
+      list = [];
+    }
     for (var i = 0; i < list.length; i++) {
-      var src = list[i].getAttribute('src');
-      if (src && !isDecorationUrl(src)) {
-        try { return new URL(src, location.href).href; } catch(_) { return src; }
+      var candidate = resolveImgCandidate(list[i]);
+      var normalized = normalizeUrlMaybe(candidate);
+      if (normalized && !isDecorationUrl(normalized)) {
+        return normalized;
       }
     }
     return '';
@@ -195,27 +286,85 @@
     var imgSource = (cfg.imageSource || 'default');
     var defaultUrl = (cfg.defaultImage || (cfg.assetsBase + '/poster.webp'));
     var timeout = 8000;
-    function load(url) {
+    function attachAspectHandler(img) {
       try {
-        if (onErrorFallback) targetImg.onerror = function(){ onErrorFallback(); };
+        if (!img) return;
+        var wrap = img.parentElement;
+        if (!wrap) return;
+        var handler = function () {
+          try { img.removeEventListener('load', handler); } catch(_) {}
+          try { img.onerror = null; } catch(_) {}
+          var naturalW = img.naturalWidth || img.width;
+          var naturalH = img.naturalHeight || img.height;
+          if (naturalW > 0 && naturalH > 0) {
+            try {
+              wrap.style.aspectRatio = naturalW + ' / ' + naturalH;
+            } catch (_) {
+              if (wrap.offsetWidth > 0) {
+                wrap.style.height = Math.round((wrap.offsetWidth * naturalH) / naturalW) + 'px';
+              }
+            }
+          }
+        };
+        img.addEventListener('load', handler, { once: true });
+      } catch (_) {}
+    }
+    function load(url, fallbackFn) {
+      try {
+        if (fallbackFn) {
+          targetImg.onerror = function(){ fallbackFn(); };
+        } else if (onErrorFallback) {
+          targetImg.onerror = function(){ onErrorFallback(); };
+        } else {
+          targetImg.onerror = null;
+        }
         targetImg.crossOrigin = 'anonymous';
         targetImg.referrerPolicy = 'no-referrer';
       } catch(_) {}
+      try {
+        targetImg.style.width = '100%';
+        targetImg.style.height = '100%';
+        targetImg.style.objectFit = 'cover';
+      } catch (_) {}
+      attachAspectHandler(targetImg);
       try { targetImg.src = url; } catch(_) {}
       try { applyUrl(url); } catch(_) {}
     }
     if (imgSource === 'thumb') {
-      var first = findFirstContentImage();
-      if (first) {
-        load(first);
-      } else {
-        var cover = getMeta('og:image', true) || getMeta('twitter:image', true);
-        if (cover && !isDecorationUrl(cover)) {
-          load(cover);
-        } else {
-          load(defaultUrl);
-        }
+      var candidates = [];
+      var seen = Object.create(null);
+      function normalize(url) {
+        if (!url) return '';
+        var str = String(url).trim();
+        if (!str) return '';
+        try { return new URL(str, location.href).href; } catch(_) {}
+        return str;
       }
+      function enqueue(url, allowDecoration) {
+        var resolved = normalize(url);
+        if (!resolved) return;
+        if (!allowDecoration && isDecorationUrl(resolved)) return;
+        if (seen[resolved]) return;
+        seen[resolved] = true;
+        candidates.push(resolved);
+      }
+
+      enqueue(cfg.postCustomCover);
+      enqueue(findFirstContentImage());
+      enqueue(getMeta('og:image', true) || getMeta('twitter:image', true));
+      enqueue(defaultUrl, true);
+
+      function tryLoad() {
+        if (!candidates.length) {
+          if (onErrorFallback) onErrorFallback();
+          return;
+        }
+        var next = candidates.shift();
+        var hasMore = candidates.length > 0;
+        load(next, hasMore ? tryLoad : null);
+      }
+
+      tryLoad();
     } else if (imgSource === 'unsplash') {
       timeout = 9000;
       var hasUnsplashKey = (cfg.unsplashAccessKey && cfg.unsplashAccessKey.length > 0);
