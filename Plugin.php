@@ -7,7 +7,7 @@ if (!defined('__TYPECHO_ROOT_DIR__')) {
  * 文章页生成海报，调用：TEPoster_Plugin::insertButton()
  * @package TEPoster
  * @author 森木志
- * @version 1.1.2
+ * @version 1.2.0
  * @link https://oxxx.cn
  *
  */
@@ -37,8 +37,6 @@ class TEPoster_Plugin implements Typecho_Plugin_Interface
 	{
 		// 顶部“通用设置”开关（点击展开/收起）
 		echo '<ul class="typecho-option" id="teposter-general-toggle" style="user-select:none;cursor:pointer;"><li><label class="typecho-label">通用设置</label><p class="description">点击展开/收起以下通用配置</p></li></ul>' . "\n";
-		// 防止展开时后台出现/消失滚动条导致页面抖动：固定滚动条槽位
-		echo '<style id="teposter-stable-scroll">html{scrollbar-gutter:stable both-edges;}body{overflow-y:scroll;}</style>' . "\n";
 
 		$logoUrl = new Typecho_Widget_Helper_Form_Element_Text(
 			'logoUrl', null, '', _t('Logo URL'), _t('网站 Logo 图片地址（可选）。')
@@ -56,7 +54,7 @@ class TEPoster_Plugin implements Typecho_Plugin_Interface
 		// 延后添加到 imageSource 下方
 
 		$customCoverField = new Typecho_Widget_Helper_Form_Element_Text(
-			'customCoverField', null, 'thumb', _t('自定义封面字段名'), _t('优先从该自定义字段取封面图（如 thumb）。')
+			'customCoverField', null, 'thumb', _t('自定义封面字段名'), _t('优先从该自定义字段取封面图（如 thumb）。支持的默认字段：image, thumb, thumbnail, cover, banner, headerImage, 以及它们的变体（如 header_image, image_url 等）。')
 		);
 		// 延后添加到 imageSource 下方
 
@@ -98,11 +96,27 @@ class TEPoster_Plugin implements Typecho_Plugin_Interface
 			'qrSizeNinetheme', null, '75', _t('ninetheme：二维码大小（px）'), _t('ninetheme 样式的二维码边长，默认 75。')
 		);
 		// 延后添加到 posterStyle 下方
+		$qrSizeNetease = new Typecho_Widget_Helper_Form_Element_Text(
+			'qrSizeNetease', null, '80', _t('网易云：二维码大小（px）'), _t('网易云样式的二维码边长，默认 80。')
+		);
+		// 延后添加到 posterStyle 下方
 
 		$summaryLength = new Typecho_Widget_Helper_Form_Element_Text(
 			'summaryLength', null, '60', _t('摘要字数'), _t('默认 60（按字符数截取，仅在行数归并策略前使用）。')
 		);
 		$form->addInput($summaryLength);
+
+		$assetSource = new Typecho_Widget_Helper_Form_Element_Radio(
+			'assetSource',
+			[
+				'local' => _t('本地内置（推荐）'),
+				'cdn' => _t('外部 CDN（使用下方地址）')
+			],
+			'local',
+			_t('依赖加载方式'),
+			_t('选择二维码与海报生成脚本的加载来源。')
+		);
+		$form->addInput($assetSource);
 
 		$cdnHtml2canvasUrl = new Typecho_Widget_Helper_Form_Element_Text(
 			'cdnHtml2canvasUrl', null, 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js', _t('html2canvas 地址'), _t('可使用 CDN 或本地文件地址。')
@@ -125,6 +139,7 @@ class TEPoster_Plugin implements Typecho_Plugin_Interface
 			$buttonClass->container->setAttribute('data-teposter-group', 'general');
 			$posterWidth->container->setAttribute('data-teposter-group', 'general');
 			$summaryLength->container->setAttribute('data-teposter-group', 'general');
+			$assetSource->container->setAttribute('data-teposter-group', 'general');
 			$cdnHtml2canvasUrl->container->setAttribute('data-teposter-group', 'general');
 			$cdnQrcodeUrl->container->setAttribute('data-teposter-group', 'general');
 			$customCss->container->setAttribute('data-teposter-group', 'general');
@@ -142,7 +157,8 @@ class TEPoster_Plugin implements Typecho_Plugin_Interface
 			'posterStyle',
 			[
 				'default' => _t('默认样式'),
-				'ninetheme' => _t('ninetheme 样式')
+				'ninetheme' => _t('ninetheme 样式'),
+				'netease' => _t('网易云样式')
 			],
 			'default',
 			_t('海报样式'),
@@ -153,6 +169,7 @@ class TEPoster_Plugin implements Typecho_Plugin_Interface
 		// 将不同样式的专属设置插入在样式单选框下方
 		$form->addInput($qrSizeDefault);
 		$form->addInput($qrSizeNinetheme);
+		$form->addInput($qrSizeNetease);
 
 		// ninetheme 样式专属设置
 		$ntBrandDesc = new Typecho_Widget_Helper_Form_Element_Text(
@@ -160,19 +177,29 @@ class TEPoster_Plugin implements Typecho_Plugin_Interface
 		);
 		$form->addInput($ntBrandDesc);
 
+		// 网易云 样式专属设置
+		$neteaseAuthor = new Typecho_Widget_Helper_Form_Element_Text(
+			'neteaseAuthor', null, '作者昵称', _t('网易云：作者昵称'), _t('显示在图片内部左下角和底部的作者昵称。')
+		);
+		$form->addInput($neteaseAuthor);
+
 		// 设置项显隐逻辑：根据海报样式 / 图片来源切换
 		try {
 			$qrSizeDefault->container->setAttribute('data-teposter-show-when', 'style:default');
 			$qrSizeNinetheme->container->setAttribute('data-teposter-show-when', 'style:ninetheme');
 			$ntBrandDesc->container->setAttribute('data-teposter-show-when', 'style:ninetheme');
+			$qrSizeNetease->container->setAttribute('data-teposter-show-when', 'style:netease');
+			$neteaseAuthor->container->setAttribute('data-teposter-show-when', 'style:netease');
 			$defaultImageUrl->container->setAttribute('data-teposter-show-when', 'source:default');
 			$customCoverField->container->setAttribute('data-teposter-show-when', 'source:thumb');
 			$unsplashAccessKey->container->setAttribute('data-teposter-show-when', 'source:unsplash');
 			$unsplashKeywords->container->setAttribute('data-teposter-show-when', 'source:unsplash');
+			$cdnHtml2canvasUrl->container->setAttribute('data-teposter-show-when', 'asset:cdn');
+			$cdnQrcodeUrl->container->setAttribute('data-teposter-show-when', 'asset:cdn');
 		} catch (\Throwable $e) {}
 
 		// 注入控制显隐脚本（通用设置折叠 + 条件展开）
-		echo '<script>(function(){function sh(){var s=(document.querySelector("input[name=posterStyle]:checked")||{}).value||"default";var src=(document.querySelector("input[name=imageSource]:checked")||{}).value||"default";document.querySelectorAll("[data-teposter-show-when]").forEach(function(el){var v=el.getAttribute("data-teposter-show-when");if(!v)return;var ok=false;v.split(" ").forEach(function(rule){var p=rule.split(":");if(p[0]==="style"&&p[1]===s)ok=true; if(p[0]==="source"&&p[1]===src)ok=true;});el.style.display=ok?"":"none";});}function initGeneral(){var t=document.getElementById("teposter-general-toggle");var list=[].slice.call(document.querySelectorAll("[data-teposter-group=general]"));if(!t||!list.length)return;var opened=false;function apply(){list.forEach(function(el){el.style.display=opened?"":"none";});var imgSrc=document.querySelector("#typecho-option-item-imageSource-"),ref=imgSrc&&imgSrc.parentNode; if(ref&&opened){ var g=document.querySelector("[data-teposter-group=general]"); if(g){ ref.insertBefore(g.parentNode, imgSrc); } } }t.addEventListener("click",function(){opened=!opened;apply();});apply();}document.addEventListener("change",function(e){if(e.target&&e.target.name&&(e.target.name==="posterStyle"||e.target.name==="imageSource")){sh();}});if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",function(){sh();initGeneral();});}else{sh();initGeneral();}})();</script>' . "\n";
+		echo '<script>(function(){function sh(){var s=(document.querySelector("input[name=posterStyle]:checked")||{}).value||"default";var src=(document.querySelector("input[name=imageSource]:checked")||{}).value||"default";var asset=(document.querySelector("input[name=assetSource]:checked")||{}).value||"local";document.querySelectorAll("[data-teposter-show-when]").forEach(function(el){var v=el.getAttribute("data-teposter-show-when");if(!v)return;var ok=false;v.split(" ").forEach(function(rule){var p=rule.split(":");if(p.length<2)return;if(p[0]==="style"&&p[1]===s)ok=true; if(p[0]==="source"&&p[1]===src)ok=true; if(p[0]==="asset"&&p[1]===asset)ok=true;});el.style.display=ok?"":"none";});}function initGeneral(){var t=document.getElementById("teposter-general-toggle");var list=[].slice.call(document.querySelectorAll("[data-teposter-group=general]"));if(!t||!list.length)return;var opened=false;function apply(){list.forEach(function(el){el.style.display=opened?"":"none";});var imgSrc=document.querySelector("#typecho-option-item-imageSource-"),ref=imgSrc&&imgSrc.parentNode; if(ref&&opened){ var g=document.querySelector("[data-teposter-group=general]"); if(g){ ref.insertBefore(g.parentNode, imgSrc); } } }t.addEventListener("click",function(){opened=!opened;apply();});apply();}document.addEventListener("change",function(e){if(e.target&&e.target.name&&(e.target.name==="posterStyle"||e.target.name==="imageSource"||e.target.name==="assetSource")){sh();}});if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",function(){sh();initGeneral();});}else{sh();initGeneral();}})();</script>' . "\n";
 	}
 
 
@@ -203,17 +230,55 @@ class TEPoster_Plugin implements Typecho_Plugin_Interface
 		$postCustomCover = '';
 		if ($isSingle) {
 			try {
+				$fieldCandidates = [];
 				if (!empty($pluginOptions->customCoverField)) {
-					$fieldName = (string)$pluginOptions->customCoverField;
-					if (isset($widget->fields) && $widget->fields) {
+					$fieldCandidates[] = (string)$pluginOptions->customCoverField;
+				}
+				$fieldCandidates = array_merge($fieldCandidates, [
+				// 最常用的字段优先
+				'image',
+				'thumb',
+				'thumbnail',
+				'cover',
+				'banner',
+				// 扩展字段
+				'headerImage',
+				'imageUrl',
+				'img',
+				'imgUrl',
+				'postImage',
+				// 驼峰和下划线变体
+				'bannerUrl',
+				'bannerurl',
+				'coverUrl',
+				'coverurl',
+				'header_image',
+				'image_url',
+				'img_url',
+				'post_image'
+			]);
+				$fieldCandidates = array_values(array_unique(array_filter($fieldCandidates)));
+				if (isset($widget->fields) && $widget->fields) {
+					foreach ($fieldCandidates as $fieldName) {
 						if (isset($widget->fields->{$fieldName}) && !empty($widget->fields->{$fieldName})) {
 							$postCustomCover = (string)$widget->fields->{$fieldName};
+							break;
 						}
 					}
 				}
-			} catch (Exception $e) {
-			}
+			} catch (\Throwable $e) {
+							// 记录错误日志，便于调试
+							if (defined('__TYPECHO_DEBUG__') && __TYPECHO_DEBUG__) {
+								error_log('TEPoster Plugin Error: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
+							}
+						}
 		}
+
+		$assetSource = !empty($pluginOptions->assetSource) ? (string)$pluginOptions->assetSource : 'local';
+		$cdnHtml2canvasUrl = !empty($pluginOptions->cdnHtml2canvasUrl) ? (string)$pluginOptions->cdnHtml2canvasUrl : 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
+		$cdnQrcodeUrl = !empty($pluginOptions->cdnQrcodeUrl) ? (string)$pluginOptions->cdnQrcodeUrl : 'https://cdn.jsdelivr.net/npm/qrcodejs2@0.0.2/qrcode.min.js';
+		$localHtml2canvasUrl = $pluginUrl . '/assets/vendor/html2canvas.min.js';
+		$localQrcodeUrl = $pluginUrl . '/assets/vendor/qrcode.min.js';
 
 		$cfg = [
 			'buttonClass' => !empty($pluginOptions->buttonClass) ? (string)$pluginOptions->buttonClass : 'teposter-btn',
@@ -221,6 +286,7 @@ class TEPoster_Plugin implements Typecho_Plugin_Interface
 			// 兼容旧版 qrSize：如存在则作为两者的后备
 			'qrSizeDefault' => isset($pluginOptions->qrSizeDefault) ? intval($pluginOptions->qrSizeDefault) : (isset($pluginOptions->qrSize) ? intval($pluginOptions->qrSize) : 130),
 			'qrSizeNinetheme' => isset($pluginOptions->qrSizeNinetheme) ? intval($pluginOptions->qrSizeNinetheme) : (isset($pluginOptions->qrSize) ? intval($pluginOptions->qrSize) : 75),
+			'qrSizeNetease' => isset($pluginOptions->qrSizeNetease) ? intval($pluginOptions->qrSizeNetease) : 80,
 			'summaryLength' => isset($pluginOptions->summaryLength) ? intval($pluginOptions->summaryLength) : 60,
 			'logoUrl' => !empty($pluginOptions->logoUrl) ? (string)$pluginOptions->logoUrl : '',
 			'unsplashKeywords' => !empty($pluginOptions->unsplashKeywords) ? (string)$pluginOptions->unsplashKeywords : '',
@@ -232,12 +298,14 @@ class TEPoster_Plugin implements Typecho_Plugin_Interface
 			'posterStyle' => !empty($pluginOptions->posterStyle) ? (string)$pluginOptions->posterStyle : 'default',
 			'siteTitle' => isset($options->title) ? (string)$options->title : '',
 			'ntBrandDesc' => !empty($pluginOptions->ntBrandDesc) ? (string)$pluginOptions->ntBrandDesc : '',
+			'neteaseAuthor' => !empty($pluginOptions->neteaseAuthor) ? (string)$pluginOptions->neteaseAuthor : '',
 			'assetsBase' => $pluginUrl . '/assets',
 			'defaultImage' => !empty($pluginOptions->defaultImageUrl) ? (string)$pluginOptions->defaultImageUrl : ($pluginUrl . '/assets/poster.webp'),
-			'cdnHtml2canvasUrl' => !empty($pluginOptions->cdnHtml2canvasUrl) ? (string)$pluginOptions->cdnHtml2canvasUrl : 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js',
-			'cdnQrcodeUrl' => !empty($pluginOptions->cdnQrcodeUrl) ? (string)$pluginOptions->cdnQrcodeUrl : 'https://cdn.jsdelivr.net/npm/qrcodejs2@0.0.2/qrcode.min.js',
-			'localHtml2canvasUrl' => $pluginUrl . '/assets/vendor/html2canvas.min.js',
-			'localQrcodeUrl' => $pluginUrl . '/assets/vendor/qrcode.min.js',
+			'cdnHtml2canvasUrl' => $cdnHtml2canvasUrl,
+			'cdnQrcodeUrl' => $cdnQrcodeUrl,
+			'localHtml2canvasUrl' => $localHtml2canvasUrl,
+			'localQrcodeUrl' => $localQrcodeUrl,
+			'assetSource' => $assetSource,
 		];
 
 		echo '<link rel="stylesheet" href="' . $cfg['assetsBase'] . '/teposter.css?v=9" />' . "\n";
@@ -245,13 +313,20 @@ class TEPoster_Plugin implements Typecho_Plugin_Interface
 			echo '<style id="teposter-custom-css">' . $pluginOptions->customCss . '</style>' . "\n";
 		}
 
-		$qrCdn = htmlspecialchars($cfg['cdnQrcodeUrl']);
-		$qrLocal = $cfg['localQrcodeUrl'];
-		$h2cCdn = htmlspecialchars($cfg['cdnHtml2canvasUrl']);
-		$h2cLocal = $cfg['localHtml2canvasUrl'];
-		echo '<script src="' . $qrCdn . '" onerror="(function(){var s=document.createElement(\'script\');s.src=\'' . $qrLocal . '\';document.head.appendChild(s);})();"></script>' . "\n";
-		echo '<script src="' . $h2cCdn . '" onerror="(function(){var s=document.createElement(\'script\');s.src=\'' . $h2cLocal . '\';document.head.appendChild(s);})();"></script>' . "\n";
-		$bootstrapFallback = "(function(){function f(){if(typeof QRCode==='undefined'){var s=document.createElement('script');s.src='" . $qrLocal . "';document.head.appendChild(s);}if(typeof html2canvas==='undefined'){var s2=document.createElement('script');s2.src='" . $h2cLocal . "';document.head.appendChild(s2);}}if(document.readyState==='complete'){setTimeout(f,300);}else{window.addEventListener('load',function(){setTimeout(f,300);});}})();";
+		$qrLocalRaw = $cfg['localQrcodeUrl'];
+		$h2cLocalRaw = $cfg['localHtml2canvasUrl'];
+		$qrLocal = htmlspecialchars($qrLocalRaw);
+		$h2cLocal = htmlspecialchars($h2cLocalRaw);
+		if ($assetSource === 'cdn') {
+			$qrCdn = htmlspecialchars($cfg['cdnQrcodeUrl']);
+			$h2cCdn = htmlspecialchars($cfg['cdnHtml2canvasUrl']);
+			echo '<script src="' . $qrCdn . '" onerror="(function(){var s=document.createElement(\'script\');s.src=\'' . $qrLocalRaw . '\';document.head.appendChild(s);})();"></script>' . "\n";
+			echo '<script src="' . $h2cCdn . '" onerror="(function(){var s=document.createElement(\'script\');s.src=\'' . $h2cLocalRaw . '\';document.head.appendChild(s);})();"></script>' . "\n";
+		} else {
+			echo '<script src="' . $qrLocal . '"></script>' . "\n";
+			echo '<script src="' . $h2cLocal . '"></script>' . "\n";
+		}
+		$bootstrapFallback = "(function(){function f(){if(typeof QRCode==='undefined'){var s=document.createElement('script');s.src='" . addslashes($assetSource === 'cdn' ? $cfg['cdnQrcodeUrl'] : $qrLocalRaw) . "';document.head.appendChild(s);}if(typeof html2canvas==='undefined'){var s2=document.createElement('script');s2.src='" . addslashes($assetSource === 'cdn' ? $cfg['cdnHtml2canvasUrl'] : $h2cLocalRaw) . "';document.head.appendChild(s2);}}if(document.readyState==='complete'){setTimeout(f,300);}else{window.addEventListener('load',function(){setTimeout(f,300);});}})();";
 		echo '<script>' . $bootstrapFallback . '</script>' . "\n";
 
 		echo '<script>window.TEPosterConfig = ' . json_encode($cfg, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) . ';</script>' . "\n";
