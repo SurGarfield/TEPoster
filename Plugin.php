@@ -7,7 +7,7 @@ if (!defined('__TYPECHO_ROOT_DIR__')) {
  * 文章页生成海报，调用：TEPoster_Plugin::insertButton()
  * @package TEPoster
  * @author 森木志
- * @version 1.2.1
+ * @version 1.3.0
  * @link https://oxxx.cn
  *
  */

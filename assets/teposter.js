@@ -18,6 +18,24 @@
     clearTimeout(showToast._t);
     showToast._t = setTimeout(function () { toast.style.display = 'none'; }, ms || 1600);
   }
+  function ensureLoadingScaffold() {
+    var wrap = $('.teposter-loading-backdrop');
+    if (wrap) return wrap;
+    wrap = createEl('div', 'teposter-loading-backdrop');
+    var spinner = createEl('div', 'teposter-loading-spinner');
+    var text = createEl('div', 'teposter-loading-text');
+    text.textContent = '海报生成中...';
+    wrap.appendChild(spinner);
+    wrap.appendChild(text);
+    document.body.appendChild(wrap);
+    return wrap;
+  }
+  function setLoading(active, text) {
+    var wrap = ensureLoadingScaffold();
+    var textEl = wrap.querySelector('.teposter-loading-text');
+    if (textEl && text) textEl.textContent = text;
+    wrap.style.display = active ? 'flex' : 'none';
+  }
   function getTextFromSelectors(selectors) {
     for (var i = 0; i < selectors.length; i++) {
       var el = $(selectors[i]);
@@ -30,22 +48,125 @@
     var m = $(sel);
     return m && m.getAttribute('content') || '';
   }
+  function sanitizeSummaryText(text) {
+    if (!text) return '';
+    var s = String(text);
+    s = s.replace(/```[\s\S]*?```/g, ' ');
+    s = s.replace(/~~~[\s\S]*?~~~/g, ' ');
+    s = s.replace(/`{1,3}[^`]*`{1,3}/g, ' ');
+    s = s.replace(/!\[[^\]]*\]\([^)]*\)/g, ' ');
+    s = s.replace(/\[([^\]]+)\]\((?:[^)]+)\)/g, '$1');
+    s = s.replace(/\[([^\]]+)\]\[[^\]]*\]/g, '$1');
+    s = s.replace(/^\s{0,3}\[[^\]]+\]:\s+\S+.*$/gm, ' ');
+    s = s.replace(/^\s{0,3}(?:#{1,6}\s*)/gm, '');
+    s = s.replace(/^\s{0,3}>\s?/gm, '');
+    s = s.replace(/^\s{0,3}(?:[-*+]|\d+\.)\s+/gm, '');
+    s = s.replace(/^\s{0,3}(?:-{3,}|\*{3,}|_{3,})\s*$/gm, ' ');
+    s = s.replace(/(\*\*|__|\*|_|~~)/g, '');
+    s = s.replace(/\[(?:\/)?[a-zA-Z][\w:-]*(?:\s+[^\]]*)?\]/g, ' ');
+    s = s.replace(/\{\{[\s\S]*?\}\}/g, ' ');
+    s = s.replace(/\{%[\s\S]*?%\}/g, ' ');
+    s = s.replace(/<%[\s\S]*?%>/g, ' ');
+    s = s.replace(/:::[\s\S]*?:::/g, ' ');
+    s = s.replace(/&nbsp;/gi, ' ');
+    s = s.replace(/\s+/g, ' ').trim();
+    return s;
+  }
+  function extractTextFromContainer(container) {
+    if (!container) return '';
+    var clone;
+    try {
+      clone = container.cloneNode(true);
+    } catch (_) {
+      clone = container;
+    }
+    var removeSelectors = [
+      'script', 'style', 'noscript', 'iframe', 'svg', 'canvas', 'form',
+      'button', 'input', 'textarea', 'select', 'nav', 'aside', 'footer', 'header',
+      '.comment', '.comments', '#comments', '.respond', '.toc', '.table-of-contents',
+      '.post-copyright', '.copyright', '.reward', '.ad', '.ads', '.advert',
+      '.share', '.social', '.qr', '.qrcode', 'pre', 'code'
+    ];
+    try {
+      var rm = clone.querySelectorAll(removeSelectors.join(', '));
+      for (var i = 0; i < rm.length; i++) {
+        if (rm[i] && rm[i].parentNode) rm[i].parentNode.removeChild(rm[i]);
+      }
+    } catch (_) { }
+
+    var best = '';
+    try {
+      var blocks = clone.querySelectorAll('p, li');
+      for (var j = 0; j < blocks.length; j++) {
+        var t = sanitizeSummaryText(blocks[j] && blocks[j].textContent || '');
+        if (t.length >= 20) return t;
+        if (t.length > best.length) best = t;
+      }
+    } catch (_) { }
+
+    var full = sanitizeSummaryText(clone.textContent || '');
+    if (full.length > best.length) return full;
+    return best;
+  }
+  function isLikelyNavOrMenu(node, text) {
+    if (!node) return true;
+    var t = String(text || '').trim();
+    if (!t) return true;
+    try {
+      if (node.closest && node.closest('nav,header,footer,aside,[role="navigation"],.menu,.menus,.nav,.navbar,.breadcrumb,.site-header,.topbar,.sidebar,.widget,.pagination')) {
+        return true;
+      }
+    } catch (_) { }
+
+    var marker = '';
+    try {
+      marker = ((node.id || '') + ' ' + (node.className || '')).toLowerCase();
+    } catch (_) { }
+    if (/(^|\s)(menu|menus|nav|navbar|header|topbar|footer|sidebar|widget|breadcrumb|pager|pagination)(\s|$)/.test(marker) && t.length < 260) {
+      return true;
+    }
+
+    var linksTextLen = 0;
+    var linkCount = 0;
+    var pCount = 0;
+    try {
+      var links = node.querySelectorAll('a');
+      linkCount = links.length;
+      for (var i = 0; i < links.length; i++) {
+        linksTextLen += sanitizeSummaryText(links[i] && links[i].textContent || '').length;
+      }
+      pCount = node.querySelectorAll('p').length;
+    } catch (_) { }
+    var linkDensity = t.length > 0 ? (linksTextLen / t.length) : 1;
+    if (linkCount >= 4 && pCount === 0 && linkDensity > 0.5) {
+      return true;
+    }
+    return false;
+  }
   function detectArticleText() {
     var candidates = [
-      // 优先从文章正文区域获取内容
-      '.post-content', '.post_container', '.post', '.container', '.entry-content', 
-      '.article-content', '.article', '.content', '#post_content', '.post_content',
-      '.main-content', '.post-main', '#main-content', '#post-main', '.single-content',
-      '.post-entry', '.entry', '.markdown-body', '.typo', '.rich-media', '.rich-content',
-      '.blog-post', '.post-body', '.post__content'
+      '#post_content', '.post_content', '.post-content', '.entry-content', '.article-content',
+      '.post__content', '.post-body', '.markdown-body', '.single-content', '.post-entry',
+      '.post_container', '.rich-content', '.rich-media', '.typo', '.blog-post',
+      '.post-main', '#post-main', '.main-content', '#main-content', '.article',
+      '.post', '.content', '.container', '.entry'
     ];
+    var fallback = '';
     for (var i = 0; i < candidates.length; i++) {
-      var el = $(candidates[i]);
-      if (el && el.textContent && el.textContent.trim().length > 0) {
-        return el.textContent.trim();
+      var nodes = document.querySelectorAll(candidates[i]);
+      for (var j = 0; j < nodes.length; j++) {
+        var node = nodes[j];
+        var text = extractTextFromContainer(node);
+        if (!text || isLikelyNavOrMenu(node, text)) {
+          continue;
+        }
+        if (text.length >= 20) {
+          return text;
+        }
+        if (text.length > fallback.length) fallback = text;
       }
     }
-    return '';
+    return fallback;
   }
   function ensureModalScaffold() {
     var backdrop = $('.teposter-modal-backdrop');
@@ -180,12 +301,12 @@
     });
   }
 
-  function ensureDepsReady() {
+  function ensureDepsReady(silent) {
     if (ensureDepsReady._p) return ensureDepsReady._p;
     var needsQR = (typeof window.QRCode === 'undefined');
     var needsH2C = (typeof window.html2canvas === 'undefined');
     if (!needsQR && !needsH2C) return Promise.resolve();
-    showToast('加载组件中…');
+    if (!silent) showToast('加载组件中…');
     var tasks = [];
     var preferLocal = (cfg.assetSource === 'local');
     var scriptTimeout = 2800;
@@ -236,6 +357,68 @@
     if (!str) return '';
     try { return new URL(str, location.href).href; } catch (_) { }
     return str;
+  }
+  function optimizeRemoteImageUrl(url) {
+    if (!url) return '';
+    var s = String(url);
+    if (!/^https?:\/\//i.test(s)) return s;
+    try {
+      var u = new URL(s, location.href);
+      var host = (u.hostname || '').toLowerCase();
+      var maxW = Math.max(900, Math.min(1400, Math.round((parseInt(cfg.posterWidth, 10) || 400) * 2.2)));
+      if (host.indexOf('unsplash.com') !== -1) {
+        if (!u.searchParams.has('auto')) u.searchParams.set('auto', 'format');
+        if (!u.searchParams.has('fit')) u.searchParams.set('fit', 'max');
+        u.searchParams.set('w', String(maxW));
+        u.searchParams.set('q', '70');
+        u.searchParams.set('fm', 'jpg');
+      }
+      return u.toString();
+    } catch (_) {
+      return s;
+    }
+  }
+  function pickUnsplashPhoto(json) {
+    var list = Array.isArray(json) ? json : (json ? [json] : []);
+    if (!list.length) return null;
+
+    var recentIds = [];
+    try {
+      var raw = sessionStorage.getItem('teposter_unsplash_recent_ids');
+      recentIds = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(recentIds)) recentIds = [];
+    } catch (_) { recentIds = []; }
+
+    function bestUrl(item) {
+      return item && item.urls && (item.urls.regular || item.urls.full || item.urls.small || item.urls.thumb) || '';
+    }
+
+    var filtered = [];
+    for (var i = 0; i < list.length; i++) {
+      var id = list[i] && list[i].id;
+      var url = bestUrl(list[i]);
+      if (!url) continue;
+      if (id && recentIds.indexOf(id) !== -1) continue;
+      filtered.push(list[i]);
+    }
+
+    var pool = filtered.length ? filtered : list;
+    var picked = pool[Math.floor(Math.random() * pool.length)] || null;
+    var pickedUrl = bestUrl(picked);
+    if (!pickedUrl) return null;
+
+    try {
+      var pickedId = picked && picked.id;
+      if (pickedId) {
+        recentIds.push(pickedId);
+        if (recentIds.length > 24) {
+          recentIds = recentIds.slice(recentIds.length - 24);
+        }
+        sessionStorage.setItem('teposter_unsplash_recent_ids', JSON.stringify(recentIds));
+      }
+    } catch (_) { }
+
+    return { id: picked && picked.id || '', url: pickedUrl };
   }
 
   function resolveImgCandidate(img) {
@@ -372,6 +555,7 @@
       } catch (_) { }
     }
     function load(url, fallbackFn) {
+      var finalUrl = optimizeRemoteImageUrl(url);
       try {
         if (fallbackFn) {
           targetImg.onerror = function () { fallbackFn(); };
@@ -389,8 +573,8 @@
         targetImg.style.objectFit = 'cover';
       } catch (_) { }
       attachAspectHandler(targetImg);
-      try { targetImg.src = url; } catch (_) { }
-      try { applyUrl(url); } catch (_) { }
+      try { targetImg.src = finalUrl; } catch (_) { }
+      try { applyUrl(finalUrl); } catch (_) { }
     }
     if (imgSource === 'thumb') {
       var candidates = [];
@@ -428,19 +612,26 @@
 
       tryLoad();
     } else if (imgSource === 'unsplash') {
-      timeout = 4000;
+      timeout = 5000;
       var hasUnsplashKey = (cfg.unsplashAccessKey && cfg.unsplashAccessKey.length > 0);
       if (hasUnsplashKey) {
         try {
           var params = new URLSearchParams();
           if (cfg.unsplashKeywords) params.set('query', String(cfg.unsplashKeywords));
           params.set('orientation', 'landscape');
+          params.set('content_filter', 'high');
+          params.set('count', '10');
+          params.set('nonce', String(Date.now()) + '-' + Math.floor(Math.random() * 1000000));
           var api = 'https://api.unsplash.com/photos/random?' + params.toString();
           var headers = { 'Accept-Version': 'v1', 'Authorization': 'Client-ID ' + cfg.unsplashAccessKey };
-          fetch(api, { headers: headers }).then(function (r) { return r.json(); }).then(function (json) {
-            var url = (json && json.urls && (json.urls.regular || json.urls.full || json.urls.small || json.urls.thumb)) || '';
+          fetch(api, { headers: headers, cache: 'no-store' }).then(function (r) {
+            if (!r.ok) throw new Error('unsplash api status ' + r.status);
+            return r.json();
+          }).then(function (json) {
+            var picked = pickUnsplashPhoto(json);
+            var url = picked && picked.url || '';
             if (url) {
-              var norm = url + (url.indexOf('?') > -1 ? '&' : '?') + 'fm=jpg&q=85';
+              var norm = url + (url.indexOf('?') > -1 ? '&' : '?') + 'rand=' + Date.now();
               load(norm);
             } else {
               load(defaultUrl);
@@ -805,35 +996,20 @@
   }
 
   function generatePoster() {
+    setLoading(true, '加载组件中...');
     // Ensure dependencies exist (handles SPA first click)
-    var depsReady = ensureDepsReady();
+    var depsReady = ensureDepsReady(true);
     return Promise.resolve(depsReady).then(function () {
       if (typeof html2canvas === 'undefined') {
         throw new Error('html2canvas not ready');
       }
+      setLoading(true, '海报生成中...');
       // Prefer on-page article title, avoid site <title>
       var pageTitle = getTextFromSelectors(['.article-info-title', '.post_info h1', '.post-title', 'article h1', '#article-info h1']) || getMeta('og:title', true) || getMeta('twitter:title', true) || document.title || '';
-      // Strictly use article content, not site description
-      var bodyFirstP = (function () {
-        var containers = [
-          '#content .post .post-content',
-          '#post_content',
-          '.post_content',
-          '.post-content',
-          '.entry-content',
-          '.article-content'
-        ];
-        for (var i = 0; i < containers.length; i++) {
-          var c = document.querySelector(containers[i]);
-          if (c) {
-            var p = c.querySelector('p');
-            if (p && p.textContent) return p.textContent.trim();
-            if (c.textContent) return c.textContent.trim();
-          }
-        }
-        return '';
-      })();
-      var fullText = bodyFirstP || detectArticleText();
+      var fullText = detectArticleText();
+      if (!fullText) {
+        fullText = sanitizeSummaryText(getMeta('description', false) || getMeta('og:description', true) || getMeta('twitter:description', true) || '');
+      }
       var summaryLimit = parseInt(cfg.summaryLength, 10);
       if (!summaryLimit || summaryLimit < 20) summaryLimit = 120;
       if (summaryLimit > 300) summaryLimit = 300;
@@ -852,7 +1028,6 @@
         dom = buildPosterDomDefault(data);
       }
 
-      showToast('生成中…');
       // Improve sharpness by rendering at higher scale with pixel budget to avoid freezes
       var dpr = (window.devicePixelRatio || 1);
       var baseScale = dpr > 1.5 ? 2 : 1.5;
@@ -904,16 +1079,17 @@
         // Fit within viewport: scale down via container flex centering (CSS)
         body.appendChild(img);
         backdrop.style.display = 'flex';
-        showToast('已生成');
       }).catch(function (err) {
         console.error(err);
         showToast('生成失败');
       }).finally(function () {
         try { dom.staging.remove(); } catch (_) { }
+        setLoading(false);
       });
     }).catch(function (err) {
       console.error(err);
       showToast('组件加载失败');
+      setLoading(false);
     });
   }
 
@@ -923,7 +1099,7 @@
     if (prewarmDeps._started) return prewarmDeps._p || Promise.resolve();
     prewarmDeps._started = true;
     prewarmDeps._p = Promise.resolve().then(function () {
-      return ensureDepsReady();
+      return ensureDepsReady(true);
     }).catch(function () {
       // Keep silent in prewarm stage, actual click will show errors.
     });

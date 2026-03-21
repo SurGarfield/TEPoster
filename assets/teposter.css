@@ -213,6 +213,43 @@
   display: none;
 }
 
+/* Center loading indicator while generating */
+.teposter-loading-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.22);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 100000;
+}
+
+.teposter-loading-spinner {
+  width: 48px;
+  height: 48px;
+  box-sizing: border-box;
+  border: 4px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #ffffff;
+  border-radius: 50%;
+  animation: teposter-spin 0.9s linear infinite;
+  will-change: transform;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+.teposter-loading-text {
+  color: #ffffff;
+  font-size: 14px;
+  line-height: 1;
+}
+
+@keyframes teposter-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 /* progress bar removed to avoid interfering with site header */
 
 /* ninetheme layout */
