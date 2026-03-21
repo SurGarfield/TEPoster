@@ -116,25 +116,67 @@
   }
 
   // Dynamically load scripts with CDN/local fallback and deduplication
-  function loadScriptOnce(url) {
+  function loadScriptOnce(url, timeoutMs) {
     return new Promise(function (resolve, reject) {
       if (!url) return reject(new Error('empty url'));
+      var cache = loadScriptOnce._cache || (loadScriptOnce._cache = {});
+      if (cache[url]) return cache[url].then(resolve, reject);
       var key = 'data-teposter-src';
-      var exists = Array.prototype.some.call(document.scripts, function (s) {
-        return s.getAttribute(key) === url || s.src === url;
+      var p = new Promise(function (res, rej) {
+        var existing = null;
+        for (var i = 0; i < document.scripts.length; i++) {
+          var si = document.scripts[i];
+          if (si.getAttribute(key) === url || si.src === url) {
+            existing = si;
+            break;
+          }
+        }
+
+        var done = false;
+        var timer = null;
+        function finish(fn, arg) {
+          if (done) return;
+          done = true;
+          if (timer) clearTimeout(timer);
+          fn(arg);
+        }
+        if (timeoutMs && timeoutMs > 0) {
+          timer = setTimeout(function () {
+            finish(rej, new Error('load timeout: ' + url));
+          }, timeoutMs);
+        }
+
+        function onLoad() { finish(res); }
+        function onError() { finish(rej, new Error('load fail: ' + url)); }
+
+        if (existing) {
+          if (existing.getAttribute('data-teposter-loaded') === '1') {
+            return finish(res);
+          }
+          existing.addEventListener('load', onLoad, { once: true });
+          existing.addEventListener('error', onError, { once: true });
+          return;
+        }
+
+        var s = document.createElement('script');
+        s.async = true;
+        s.defer = true;
+        s.setAttribute(key, url);
+        s.src = url;
+        s.onload = function () {
+          try { s.setAttribute('data-teposter-loaded', '1'); } catch (_) { }
+          onLoad();
+        };
+        s.onerror = onError;
+        (document.head || document.documentElement).appendChild(s);
       });
-      if (exists) {
-        // If script tag exists, wait a tick in case it's still loading
-        return setTimeout(resolve, 50);
-      }
-      var s = document.createElement('script');
-      s.async = true;
-      s.defer = true;
-      s.setAttribute(key, url);
-      s.src = url;
-      s.onload = function () { resolve(); };
-      s.onerror = function () { reject(new Error('load fail: ' + url)); };
-      (document.head || document.documentElement).appendChild(s);
+      cache[url] = p;
+      p.then(function () {
+        if (loadScriptOnce._cache) delete loadScriptOnce._cache[url];
+      }, function () {
+        if (loadScriptOnce._cache) delete loadScriptOnce._cache[url];
+      });
+      p.then(resolve, reject);
     });
   }
 
@@ -145,15 +187,21 @@
     if (!needsQR && !needsH2C) return Promise.resolve();
     showToast('加载组件中…');
     var tasks = [];
+    var preferLocal = (cfg.assetSource === 'local');
+    var scriptTimeout = 2800;
     if (needsQR) {
       var qrCdn = cfg.cdnQrcodeUrl;
       var qrLocal = cfg.localQrcodeUrl || (cfg.assetsBase + '/vendor/qrcode.min.js');
-      tasks.push(loadScriptOnce(qrCdn).catch(function () { return loadScriptOnce(qrLocal); }));
+      var qrPrimary = preferLocal ? qrLocal : qrCdn;
+      var qrSecondary = preferLocal ? qrCdn : qrLocal;
+      tasks.push(loadScriptOnce(qrPrimary, scriptTimeout).catch(function () { return loadScriptOnce(qrSecondary, scriptTimeout); }));
     }
     if (needsH2C) {
       var h2cCdn = cfg.cdnHtml2canvasUrl;
       var h2cLocal = cfg.localHtml2canvasUrl || (cfg.assetsBase + '/vendor/html2canvas.min.js');
-      tasks.push(loadScriptOnce(h2cCdn).catch(function () { return loadScriptOnce(h2cLocal); }));
+      var h2cPrimary = preferLocal ? h2cLocal : h2cCdn;
+      var h2cSecondary = preferLocal ? h2cCdn : h2cLocal;
+      tasks.push(loadScriptOnce(h2cPrimary, scriptTimeout).catch(function () { return loadScriptOnce(h2cSecondary, scriptTimeout); }));
     }
     ensureDepsReady._p = Promise.all(tasks).then(function () {
       if (typeof window.QRCode === 'undefined' || typeof window.html2canvas === 'undefined') {
@@ -299,7 +347,7 @@
   function chooseImageAndLoad(targetImg, applyUrl, onErrorFallback) {
     var imgSource = (cfg.imageSource || 'default');
     var defaultUrl = (cfg.defaultImage || (cfg.assetsBase + '/poster.webp'));
-    var timeout = 8000;
+    var timeout = 3200;
     function attachAspectHandler(img) {
       try {
         if (!img) return;
@@ -380,7 +428,7 @@
 
       tryLoad();
     } else if (imgSource === 'unsplash') {
-      timeout = 9000;
+      timeout = 4000;
       var hasUnsplashKey = (cfg.unsplashAccessKey && cfg.unsplashAccessKey.length > 0);
       if (hasUnsplashKey) {
         try {
@@ -453,7 +501,7 @@
     } catch (_) { }
     var randomImg = createEl('img');
     randomImg.loading = 'eager';
-    randomImg.decoding = 'sync';
+    randomImg.decoding = 'async';
     function setSvgPlaceholder() {
       var svg = encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#f8fbff" offset="0"/><stop stop-color="#e8f0fe" offset="1"/></linearGradient></defs><rect fill="url(#g)" width="800" height="600"/></svg>');
       randomImg.src = 'data:image/svg+xml;charset=utf-8,' + svg;
@@ -542,7 +590,7 @@
     // Choose image and set as background
     var randomImg = new Image();
     randomImg.loading = 'eager';
-    randomImg.decoding = 'sync';
+    randomImg.decoding = 'async';
     function setSvgPlaceholder() {
       var svg = encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#7b90ff" offset="0"/><stop stop-color="#b35fff" offset="1"/></linearGradient></defs><rect fill="url(#g)" width="1600" height="900"/></svg>');
       hero.style.backgroundImage = 'url("data:image/svg+xml;charset=utf-8,' + svg + '")';
@@ -622,7 +670,7 @@
 
     var randomImg = new Image();
     randomImg.loading = 'eager';
-    randomImg.decoding = 'sync';
+    randomImg.decoding = 'async';
 
     function setSvgPlaceholder() {
       var svg = encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="800" height="800"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#f5f5f5" offset="0"/><stop stop-color="#e0e0e0" offset="1"/></linearGradient></defs><rect fill="url(#g)" width="800" height="800"/></svg>');
@@ -786,8 +834,13 @@
         return '';
       })();
       var fullText = bodyFirstP || detectArticleText();
-      // Do not hard-limit by chars; keep fullText for line clamp (CSS limits to 4 lines)
+      var summaryLimit = parseInt(cfg.summaryLength, 10);
+      if (!summaryLimit || summaryLimit < 20) summaryLimit = 120;
+      if (summaryLimit > 300) summaryLimit = 300;
       var summary = fullText;
+      if (summary && summary.length > summaryLimit) {
+        summary = summary.slice(0, summaryLimit).replace(/\s+$/g, '') + '...';
+      }
       var data = { title: pageTitle, summary: summary, url: location.href };
 
       var dom;
@@ -802,8 +855,8 @@
       showToast('生成中…');
       // Improve sharpness by rendering at higher scale with pixel budget to avoid freezes
       var dpr = (window.devicePixelRatio || 1);
-      var baseScale = Math.max(1.5, Math.min(3, dpr * 2));
-      var maxPixels = 4e6; // 4MP budget
+      var baseScale = dpr > 1.5 ? 2 : 1.5;
+      var maxPixels = 2.5e6; // 2.5MP budget
       var rect = dom.root.getBoundingClientRect();
       var estPixels = rect.width * rect.height * baseScale * baseScale;
       var scale = baseScale;
@@ -818,12 +871,33 @@
           willReadFrequently: true
         });
       }).then(function (canvas) {
-        var imgUrl = canvas.toDataURL('image/png');
+        return new Promise(function (resolve) {
+          try {
+            if (canvas.toBlob) {
+              canvas.toBlob(function (blob) {
+                if (blob) {
+                  return resolve({ url: URL.createObjectURL(blob), objectUrl: true });
+                }
+                resolve({ url: canvas.toDataURL('image/png'), objectUrl: false });
+              }, 'image/png');
+              return;
+            }
+          } catch (_) { }
+          resolve({ url: canvas.toDataURL('image/png'), objectUrl: false });
+        });
+      }).then(function (imgData) {
         var backdrop = ensureModalScaffold();
         var body = backdrop.querySelector('.teposter-modal-body');
+        var oldImg = body.querySelector('img');
+        if (oldImg && oldImg.getAttribute('data-teposter-object-url') === '1') {
+          try { URL.revokeObjectURL(oldImg.src); } catch (_) { }
+        }
         body.innerHTML = '';
         var img = createEl('img');
-        img.src = imgUrl;
+        img.src = imgData.url;
+        if (imgData.objectUrl) {
+          img.setAttribute('data-teposter-object-url', '1');
+        }
         img.style.maxWidth = '100%';
         img.style.height = 'auto';
         img.style.objectFit = 'contain';
@@ -845,11 +919,34 @@
 
   // auto insert removed
 
+  function prewarmDeps() {
+    if (prewarmDeps._started) return prewarmDeps._p || Promise.resolve();
+    prewarmDeps._started = true;
+    prewarmDeps._p = Promise.resolve().then(function () {
+      return ensureDepsReady();
+    }).catch(function () {
+      // Keep silent in prewarm stage, actual click will show errors.
+    });
+    return prewarmDeps._p;
+  }
+
+  function bindButtonPrewarm(btn) {
+    if (!btn || btn._teposterPrewarmBound) return;
+    btn._teposterPrewarmBound = true;
+    var onceOpts = { once: true, passive: true };
+    try { btn.addEventListener('mouseenter', prewarmDeps, onceOpts); } catch (_) { }
+    try { btn.addEventListener('touchstart', prewarmDeps, onceOpts); } catch (_) { }
+    try { btn.addEventListener('focus', prewarmDeps, { once: true }); } catch (_) { }
+  }
+
   function wireManualButton() {
     var btn = document.getElementById('teposter-generate');
     if (btn && !btn._teposterBound) {
       btn.addEventListener('click', generatePoster);
       btn._teposterBound = true;
+    }
+    if (btn) {
+      bindButtonPrewarm(btn);
     }
   }
 
@@ -862,6 +959,43 @@
   }
 
   // removed persistent progress bar to avoid theme conflicts
+
+  function bindPrewarmOnce() {
+    if (window.__TEPosterPrewarmBoundV1) return;
+    window.__TEPosterPrewarmBoundV1 = true;
+
+    function warmOnIntent() {
+      prewarmDeps();
+      try { document.removeEventListener('pointerdown', warmOnIntent, true); } catch (_) { }
+      try { document.removeEventListener('keydown', warmOnIntent, true); } catch (_) { }
+      try { document.removeEventListener('touchstart', warmOnIntent, true); } catch (_) { }
+    }
+
+    try { document.addEventListener('pointerdown', warmOnIntent, { once: true, capture: true, passive: true }); } catch (_) { }
+    try { document.addEventListener('touchstart', warmOnIntent, { once: true, capture: true, passive: true }); } catch (_) { }
+    try { document.addEventListener('keydown', warmOnIntent, { once: true, capture: true }); } catch (_) { }
+
+    try {
+      var btn = document.getElementById('teposter-generate');
+      if (btn && 'IntersectionObserver' in window) {
+        var io = new IntersectionObserver(function (entries) {
+          for (var i = 0; i < entries.length; i++) {
+            if (entries[i] && entries[i].isIntersecting) {
+              prewarmDeps();
+              try { io.disconnect(); } catch (_) { }
+              break;
+            }
+          }
+        }, { rootMargin: '120px 0px' });
+        io.observe(btn);
+      }
+    } catch (_) { }
+
+    try {
+      var idle = window.requestIdleCallback || function (cb) { return setTimeout(cb, 600); };
+      idle(function () { prewarmDeps(); });
+    } catch (_) { }
+  }
 
   function bindDelegatesOnce() {
     if (window.__TEPosterBoundV1) return;
@@ -916,6 +1050,7 @@
 
   ready(function () {
     wireManualButton();
+    bindPrewarmOnce();
     bindDelegatesOnce();
     // Expose for manual triggering if needed
     window.TEPoster = window.TEPoster || {};
