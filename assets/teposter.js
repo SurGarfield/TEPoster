@@ -1,6 +1,18 @@
 (function () {
   var cfg = (window.TEPosterConfig || {});
 
+  function syncPageConfig() {
+    if (window.TEPosterConfig && window.TEPosterConfig !== cfg) {
+      cfg = window.TEPosterConfig;
+    }
+    var button = document.getElementById('teposter-generate');
+    if (!button) return;
+    cfg.postCustomCover = button.getAttribute('data-teposter-post-cover') || '';
+    cfg.postDateISO = button.getAttribute('data-teposter-post-date') || '';
+    cfg.postAuthor = button.getAttribute('data-teposter-post-author') || '';
+    cfg.postAuthorAvatar = button.getAttribute('data-teposter-post-author-avatar') || '';
+  }
+
   function $(sel, ctx) { return (ctx || document).querySelector(sel); }
   function createEl(tag, cls) {
     var el = document.createElement(tag);
@@ -168,24 +180,74 @@
     }
     return fallback;
   }
+
+  function previewStyleName(style) {
+    if (style === 'ninetheme') return 'ninetheme';
+    if (style === 'netease') return '网易云';
+    if (style === 'minimal') return '深色卡片';
+    return '默认样式';
+  }
+
+  function fitPosterPreview(backdrop, img, style) {
+    var modal = backdrop.querySelector('.teposter-modal');
+    var body = backdrop.querySelector('.teposter-modal-body');
+    var meta = backdrop.querySelector('.teposter-preview-meta');
+    if (!modal || !body || !img) return;
+
+    var naturalWidth = img.naturalWidth || 800;
+    var naturalHeight = img.naturalHeight || 1200;
+    var ratio = naturalWidth / Math.max(1, naturalHeight);
+    var viewportWidth = document.documentElement.clientWidth || window.innerWidth || 400;
+    var viewportHeight = document.documentElement.clientHeight || window.innerHeight || 720;
+    var preferredWidth = style === 'minimal' ? 430 : (style === 'netease' ? 410 : (style === 'ninetheme' ? 390 : 400));
+    var maxImageWidth = Math.max(120, viewportWidth - 64);
+    var maxImageHeight = Math.max(120, viewportHeight - 184);
+    var previewWidth = Math.max(96, Math.min(preferredWidth, maxImageWidth, maxImageHeight * ratio));
+
+    modal.style.width = Math.ceil(previewWidth + 34) + 'px';
+    body.style.setProperty('--teposter-preview-width', Math.floor(previewWidth) + 'px');
+    body.style.setProperty('--teposter-preview-height', Math.floor(maxImageHeight) + 'px');
+    backdrop.setAttribute('data-poster-style', style || 'default');
+    if (meta) {
+      meta.textContent = previewStyleName(style) + ' · ' + naturalWidth + ' × ' + naturalHeight;
+    }
+  }
+
   function ensureModalScaffold() {
     var backdrop = $('.teposter-modal-backdrop');
     if (backdrop) return backdrop;
     backdrop = createEl('div', 'teposter-modal-backdrop');
     var modal = createEl('div', 'teposter-modal');
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    modal.setAttribute('aria-labelledby', 'teposter-preview-title');
+    modal.tabIndex = -1;
     var header = createEl('div', 'teposter-modal-header');
-    var title = createEl('div');
+    var title = createEl('div', 'teposter-modal-title');
+    title.id = 'teposter-preview-title';
     title.textContent = '海报预览';
     var closeBtn = createEl('button', 'teposter-close');
+    closeBtn.type = 'button';
+    closeBtn.setAttribute('aria-label', '关闭预览');
+    closeBtn.title = '关闭预览';
     closeBtn.innerHTML = '✕';
-    closeBtn.addEventListener('click', function () { backdrop.style.display = 'none'; });
+
+    function closePreview() {
+      backdrop.style.display = 'none';
+      var trigger = document.getElementById('teposter-generate');
+      if (trigger && trigger.focus) trigger.focus();
+    }
+
+    closeBtn.addEventListener('click', closePreview);
     header.appendChild(title);
     header.appendChild(closeBtn);
     var body = createEl('div', 'teposter-modal-body');
     var footer = createEl('div', 'teposter-modal-footer');
-    var btnClass = (cfg.buttonClass && cfg.buttonClass.length) ? cfg.buttonClass : 'teposter-btn';
-    var downloadBtn = createEl('button', btnClass);
-    downloadBtn.textContent = '下载图片';
+    var previewMeta = createEl('div', 'teposter-preview-meta');
+    previewMeta.textContent = '海报生成完成';
+    var downloadBtn = createEl('button', 'teposter-download');
+    downloadBtn.type = 'button';
+    downloadBtn.textContent = '下载海报';
     downloadBtn.addEventListener('click', function () {
       var img = body.querySelector('img');
       if (!img) return;
@@ -194,12 +256,25 @@
       a.download = 'poster.png';
       a.click();
     });
+    footer.appendChild(previewMeta);
     footer.appendChild(downloadBtn);
     modal.appendChild(header);
     modal.appendChild(body);
     modal.appendChild(footer);
     backdrop.appendChild(modal);
     document.body.appendChild(backdrop);
+
+    backdrop.addEventListener('click', function (event) {
+      if (event.target === backdrop) closePreview();
+    });
+    document.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape' && backdrop.style.display === 'flex') closePreview();
+    });
+    window.addEventListener('resize', function () {
+      if (backdrop.style.display === 'flex' && typeof backdrop._teposterFit === 'function') {
+        backdrop._teposterFit();
+      }
+    });
     return backdrop;
   }
 
@@ -310,24 +385,43 @@
     var tasks = [];
     var preferLocal = (cfg.assetSource === 'local');
     var scriptTimeout = 2800;
+
+    function loadDependency(primary, secondary, isReady) {
+      function loadAndVerify(url) {
+        return loadScriptOnce(url, scriptTimeout).then(function () {
+          if (!isReady()) throw new Error('dependency unavailable: ' + url);
+        });
+      }
+      return loadAndVerify(primary).catch(function () {
+        return loadAndVerify(secondary);
+      });
+    }
+
     if (needsQR) {
       var qrCdn = cfg.cdnQrcodeUrl;
       var qrLocal = cfg.localQrcodeUrl || (cfg.assetsBase + '/vendor/qrcode.min.js');
       var qrPrimary = preferLocal ? qrLocal : qrCdn;
       var qrSecondary = preferLocal ? qrCdn : qrLocal;
-      tasks.push(loadScriptOnce(qrPrimary, scriptTimeout).catch(function () { return loadScriptOnce(qrSecondary, scriptTimeout); }));
+      tasks.push(loadDependency(qrPrimary, qrSecondary, function () {
+        return typeof window.QRCode !== 'undefined';
+      }));
     }
     if (needsH2C) {
       var h2cCdn = cfg.cdnHtml2canvasUrl;
       var h2cLocal = cfg.localHtml2canvasUrl || (cfg.assetsBase + '/vendor/html2canvas.min.js');
       var h2cPrimary = preferLocal ? h2cLocal : h2cCdn;
       var h2cSecondary = preferLocal ? h2cCdn : h2cLocal;
-      tasks.push(loadScriptOnce(h2cPrimary, scriptTimeout).catch(function () { return loadScriptOnce(h2cSecondary, scriptTimeout); }));
+      tasks.push(loadDependency(h2cPrimary, h2cSecondary, function () {
+        return typeof window.html2canvas !== 'undefined';
+      }));
     }
     ensureDepsReady._p = Promise.all(tasks).then(function () {
       if (typeof window.QRCode === 'undefined' || typeof window.html2canvas === 'undefined') {
         throw new Error('deps not ready');
       }
+    }).catch(function (error) {
+      ensureDepsReady._p = null;
+      throw error;
     });
     return ensureDepsReady._p;
   }
@@ -345,10 +439,65 @@
   }
 
   // Utilities shared by layouts
+  var MIN_COVER_SHORT_EDGE = 180;
+  var MIN_COVER_LONG_EDGE = 320;
+  var MIN_COVER_AREA = 120000;
+
   function isDecorationUrl(url) {
     if (!url) return true;
-    var u = String(url);
-    return /(logo|icon|avatar|emoji|sprite|placeholder)\/|\.(svg)$/i.test(u);
+    var u = String(url).toLowerCase();
+    if (/^(?:data|blob):/i.test(u)) return true;
+    if (/\.(?:svg)(?:[?#]|$)/i.test(u)) return true;
+    if (/(?:^|[\/_.?&=-])(?:avatar|gravatar|emoji|emoticon|sticker|icon|logo|badge|sprite|placeholder|qrcode|qr-code|reward)(?:[\/_.?&=-]|$)/i.test(u)) return true;
+    return /(?:loading|lazy|spacer|blank|transparent)[-_.]?(?:image|pixel)?\.(?:gif|png|webp)(?:[?#]|$)/i.test(u);
+  }
+
+  function isDecorationImage(img) {
+    if (!img) return true;
+    try {
+      if (img.closest('nav, aside, footer, .author, .post-author, .entry-author, .profile, .avatar, .comments, .comment, .reward, .share, .social, .qrcode, .qr-code')) {
+        return true;
+      }
+    } catch (_) { }
+
+    var semanticText = [
+      img.id,
+      img.className,
+      img.getAttribute('alt'),
+      img.getAttribute('title'),
+      img.getAttribute('role')
+    ].join(' ').toLowerCase();
+    return /(?:^|[\s_-])(?:avatar|gravatar|emoji|emoticon|sticker|icon|logo|badge|qrcode|qr-code|reward|author|profile)(?:[\s_-]|$)/i.test(semanticText);
+  }
+
+  function pickLargestSrcset(srcset) {
+    if (!srcset || !String(srcset).trim()) return '';
+    var bestUrl = '';
+    var bestScore = -1;
+    String(srcset).split(',').forEach(function (item) {
+      var parts = item.trim().split(/\s+/);
+      if (!parts[0]) return;
+      var descriptor = parts[1] || '1x';
+      var score = parseFloat(descriptor) || 1;
+      if (/w$/i.test(descriptor)) score *= 1000;
+      if (score > bestScore) {
+        bestScore = score;
+        bestUrl = parts[0];
+      }
+    });
+    return bestUrl;
+  }
+
+  function isUsableCoverDimensions(img, allowSmall) {
+    if (allowSmall) return true;
+    var width = Number(img && img.naturalWidth) || 0;
+    var height = Number(img && img.naturalHeight) || 0;
+    if (!width || !height) return false;
+    var shortEdge = Math.min(width, height);
+    var longEdge = Math.max(width, height);
+    return shortEdge >= MIN_COVER_SHORT_EDGE
+      && longEdge >= MIN_COVER_LONG_EDGE
+      && width * height >= MIN_COVER_AREA;
   }
 
   function normalizeUrlMaybe(url) {
@@ -357,6 +506,31 @@
     if (!str) return '';
     try { return new URL(str, location.href).href; } catch (_) { }
     return str;
+  }
+  function getSameSiteUploadCandidates(url) {
+    var normalized = normalizeUrlMaybe(url);
+    if (!normalized) return [];
+    var candidates = [];
+    try {
+      var parsed = new URL(normalized, location.href);
+      if (parsed.origin !== location.origin && /^\/usr\/uploads(?:\/|$)/i.test(parsed.pathname)) {
+        candidates.push(location.origin + parsed.pathname + parsed.search + parsed.hash);
+      }
+    } catch (_) { }
+    if (candidates.indexOf(normalized) === -1) candidates.push(normalized);
+    return candidates;
+  }
+  function setImageCorsMode(img, url) {
+    try {
+      var parsed = new URL(url, location.href);
+      if (parsed.origin === location.origin) {
+        img.removeAttribute('crossorigin');
+      } else {
+        img.crossOrigin = 'anonymous';
+      }
+    } catch (_) {
+      img.removeAttribute('crossorigin');
+    }
   }
   function optimizeRemoteImageUrl(url) {
     if (!url) return '';
@@ -424,105 +598,72 @@
   function resolveImgCandidate(img) {
     if (!img) return '';
     var attrOrder = [
-      'src',
-      'data-src',
       'data-original',
       'data-original-src',
+      'data-src',
       'data-lazy',
       'data-lazy-src',
-      'data-url',
-      'data-image',
-      'data-img',
       'data-full',
       'data-preview',
       'data-zoom',
       'data-zoom-img',
       'data-large',
-      'data-origin',
-      'data-bg',
-      'data-echo'
+      'data-origin'
     ];
     for (var i = 0; i < attrOrder.length; i++) {
       var val = img.getAttribute(attrOrder[i]);
       if (val && val.trim()) return val;
     }
-    try {
-      if (img.dataset) {
-        var datasetPriority = ['src', 'original', 'originalSrc', 'lazy', 'lazySrc', 'url', 'image', 'img', 'full', 'preview', 'zoom', 'zoomImg', 'large', 'origin', 'bg', 'echo'];
-        for (var j = 0; j < datasetPriority.length; j++) {
-          var key = datasetPriority[j];
-          if (typeof img.dataset[key] === 'string' && img.dataset[key]) {
-            return img.dataset[key];
-          }
-        }
-        for (var k in img.dataset) {
-          if (Object.prototype.hasOwnProperty.call(img.dataset, k) && typeof img.dataset[k] === 'string' && img.dataset[k]) {
-            return img.dataset[k];
-          }
-        }
-      }
-    } catch (_) { }
     if (img.currentSrc) return img.currentSrc;
-    var srcset = img.getAttribute('srcset');
+    var srcset = img.getAttribute('data-srcset') || img.getAttribute('srcset');
     if (!srcset && img.dataset) {
       srcset = img.dataset.srcset || img.dataset.srcSet;
     }
-    if (srcset && srcset.trim()) {
-      var firstItem = srcset.split(',')[0];
-      if (firstItem) {
-        var parts = firstItem.trim().split(/\s+/);
-        if (parts.length > 0 && parts[0]) {
-          return parts[0];
-        }
-      }
-    }
-    return '';
+    var srcsetUrl = pickLargestSrcset(srcset);
+    if (srcsetUrl) return srcsetUrl;
+    return img.getAttribute('src') || '';
   }
 
-  function findFirstContentImage() {
-    var selectors = [
-      // 优先从文章正文区域查找图片
-      '.post-content img',
-      '.post_container img',
-      '.post img',
-      '.container img',
-      '.article img',
-      '.entry-content img',
-      '.article-content img',
-      '.content_top img',
-      '#post-content img',
-      '#content .post .post-content img',
-      'article .post-content img',
-      'article img',
-      '.markdown-body img',
-      '.typo img',
-      '.rich-media img',
-      '.rich-content img',
-      '.blog-post img',
-      '.post-body img',
-      '.post_content img',
-      '.main-content img',
-      '.post-main img',
-      '#main-content img',
-      '#post-main img',
-      '.single-content img',
-      '.post-entry img',
-      '.entry img'
+  function findContentImageCandidates() {
+    var containerSelectors = [
+      '.post-content',
+      '.entry-content',
+      '.post_content',
+      '.article-content',
+      '#post-content',
+      '#content .post .post-content',
+      'article .post-content',
+      '.markdown-body',
+      '.typo',
+      '.rich-media',
+      '.rich-content',
+      '.blog-post',
+      '.post-body',
+      '.single-content',
+      '.post-entry',
+      'article'
     ];
-    var list;
-    try {
-      list = document.querySelectorAll(selectors.join(', '));
-    } catch (_) {
-      list = [];
-    }
-    for (var i = 0; i < list.length; i++) {
-      var candidate = resolveImgCandidate(list[i]);
-      var normalized = normalizeUrlMaybe(candidate);
-      if (normalized && !isDecorationUrl(normalized)) {
-        return normalized;
+    var seenNodes = [];
+    var seenUrls = Object.create(null);
+    var candidates = [];
+
+    for (var i = 0; i < containerSelectors.length; i++) {
+      var container = null;
+      try { container = document.querySelector(containerSelectors[i]); } catch (_) { }
+      if (!container) continue;
+      var images = container.querySelectorAll('img');
+      for (var j = 0; j < images.length; j++) {
+        var img = images[j];
+        if (seenNodes.indexOf(img) !== -1 || isDecorationImage(img)) continue;
+        seenNodes.push(img);
+        var normalized = normalizeUrlMaybe(resolveImgCandidate(img));
+        if (!normalized || isDecorationUrl(normalized) || seenUrls[normalized]) continue;
+        seenUrls[normalized] = true;
+        candidates.push(normalized);
       }
+      if (candidates.length) break;
     }
-    return '';
+    return candidates;
   }
 
   // Resolve and load main image then call applyUrl(url).
@@ -530,89 +671,78 @@
   function chooseImageAndLoad(targetImg, applyUrl, onErrorFallback) {
     var imgSource = (cfg.imageSource || 'default');
     var defaultUrl = (cfg.defaultImage || (cfg.assetsBase + '/poster.webp'));
-    var timeout = 3200;
-    function attachAspectHandler(img) {
-      try {
-        if (!img) return;
-        var wrap = img.parentElement;
-        if (!wrap) return;
-        var handler = function () {
-          try { img.removeEventListener('load', handler); } catch (_) { }
-          try { img.onerror = null; } catch (_) { }
-          var naturalW = img.naturalWidth || img.width;
-          var naturalH = img.naturalHeight || img.height;
-          if (naturalW > 0 && naturalH > 0) {
-            try {
-              wrap.style.aspectRatio = naturalW + ' / ' + naturalH;
-            } catch (_) {
-              if (wrap.offsetWidth > 0) {
-                wrap.style.height = Math.round((wrap.offsetWidth * naturalH) / naturalW) + 'px';
-              }
-            }
-          }
-        };
-        img.addEventListener('load', handler, { once: true });
-      } catch (_) { }
-    }
-    function load(url, fallbackFn) {
-      var finalUrl = optimizeRemoteImageUrl(url);
-      try {
-        if (fallbackFn) {
-          targetImg.onerror = function () { fallbackFn(); };
-        } else if (onErrorFallback) {
-          targetImg.onerror = function () { onErrorFallback(); };
-        } else {
+    var candidateTimeout = 3200;
+
+    function loadCandidate(candidate) {
+      return new Promise(function (resolve) {
+        var finalUrl = optimizeRemoteImageUrl(candidate.url);
+        var settled = false;
+        var timer = null;
+
+        function cleanup() {
+          if (timer) clearTimeout(timer);
+          targetImg.onload = null;
           targetImg.onerror = null;
         }
-        targetImg.crossOrigin = 'anonymous';
-        targetImg.referrerPolicy = 'no-referrer';
-      } catch (_) { }
-      try {
-        targetImg.style.width = '100%';
-        targetImg.style.height = '100%';
-        targetImg.style.objectFit = 'cover';
-      } catch (_) { }
-      attachAspectHandler(targetImg);
-      try { targetImg.src = finalUrl; } catch (_) { }
-      try { applyUrl(finalUrl); } catch (_) { }
+        function finish(ok) {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          resolve(ok);
+        }
+        targetImg.onload = function () {
+          if (settled) return;
+          if (!isUsableCoverDimensions(targetImg, candidate.allowSmall)) return finish(false);
+          try { applyUrl(finalUrl); } catch (_) { }
+          finish(true);
+        };
+        targetImg.onerror = function () { finish(false); };
+        timer = setTimeout(function () { finish(false); }, candidateTimeout);
+
+        try {
+          setImageCorsMode(targetImg, finalUrl);
+          targetImg.referrerPolicy = 'no-referrer';
+          targetImg.style.width = '100%';
+          targetImg.style.height = '100%';
+          targetImg.style.objectFit = 'cover';
+          targetImg.src = finalUrl;
+          if (targetImg.complete) setTimeout(targetImg.onload, 0);
+        } catch (_) {
+          finish(false);
+        }
+      });
     }
+
+    function loadCandidates(candidates, index) {
+      if (index >= candidates.length) {
+        try { if (onErrorFallback) onErrorFallback(); } catch (_) { }
+        return waitForImage(targetImg, 1000);
+      }
+      return loadCandidate(candidates[index]).then(function (loaded) {
+        if (loaded) return;
+        return loadCandidates(candidates, index + 1);
+      });
+    }
+
     if (imgSource === 'thumb') {
       var candidates = [];
       var seen = Object.create(null);
-      function normalize(url) {
-        if (!url) return '';
-        var str = String(url).trim();
-        if (!str) return '';
-        try { return new URL(str, location.href).href; } catch (_) { }
-        return str;
-      }
-      function enqueue(url, allowDecoration) {
-        var resolved = normalize(url);
-        if (!resolved) return;
-        if (!allowDecoration && isDecorationUrl(resolved)) return;
-        if (seen[resolved]) return;
-        seen[resolved] = true;
-        candidates.push(resolved);
+      function enqueue(url, allowDecoration, allowSmall) {
+        getSameSiteUploadCandidates(url).forEach(function (resolved) {
+          if (!allowDecoration && isDecorationUrl(resolved)) return;
+          if (seen[resolved]) return;
+          seen[resolved] = true;
+          candidates.push({ url: resolved, allowSmall: !!allowSmall });
+        });
       }
 
       enqueue(cfg.postCustomCover);
-      enqueue(findFirstContentImage());
+      findContentImageCandidates().forEach(function (url) { enqueue(url); });
       enqueue(getMeta('og:image', true) || getMeta('twitter:image', true));
-      enqueue(defaultUrl, true);
-
-      function tryLoad() {
-        if (!candidates.length) {
-          if (onErrorFallback) onErrorFallback();
-          return;
-        }
-        var next = candidates.shift();
-        var hasMore = candidates.length > 0;
-        load(next, hasMore ? tryLoad : null);
-      }
-
-      tryLoad();
+      enqueue(defaultUrl, true, true);
+      return loadCandidates(candidates, 0);
     } else if (imgSource === 'unsplash') {
-      timeout = 5000;
+      candidateTimeout = 5000;
       var hasUnsplashKey = (cfg.unsplashAccessKey && cfg.unsplashAccessKey.length > 0);
       if (hasUnsplashKey) {
         try {
@@ -624,7 +754,7 @@
           params.set('nonce', String(Date.now()) + '-' + Math.floor(Math.random() * 1000000));
           var api = 'https://api.unsplash.com/photos/random?' + params.toString();
           var headers = { 'Accept-Version': 'v1', 'Authorization': 'Client-ID ' + cfg.unsplashAccessKey };
-          fetch(api, { headers: headers, cache: 'no-store' }).then(function (r) {
+          return fetch(api, { headers: headers, cache: 'no-store' }).then(function (r) {
             if (!r.ok) throw new Error('unsplash api status ' + r.status);
             return r.json();
           }).then(function (json) {
@@ -632,40 +762,37 @@
             var url = picked && picked.url || '';
             if (url) {
               var norm = url + (url.indexOf('?') > -1 ? '&' : '?') + 'rand=' + Date.now();
-              load(norm);
-            } else {
-              load(defaultUrl);
+              return loadCandidates([{ url: norm, allowSmall: false }, { url: defaultUrl, allowSmall: true }], 0);
             }
-          }).catch(function () { load(defaultUrl); });
+            return loadCandidates([{ url: defaultUrl, allowSmall: true }], 0);
+          }).catch(function () {
+            return loadCandidates([{ url: defaultUrl, allowSmall: true }], 0);
+          });
         } catch (_) {
-          load(defaultUrl);
+          return loadCandidates([{ url: defaultUrl, allowSmall: true }], 0);
         }
-      } else {
-        load(defaultUrl);
       }
-    } else {
-      load(defaultUrl);
+      return loadCandidates([{ url: defaultUrl, allowSmall: true }], 0);
     }
-    return waitForImage(targetImg, timeout);
+    return loadCandidates([{ url: defaultUrl, allowSmall: true }], 0);
   }
 
   function buildPosterDomDefault(data) {
     var width = Math.max(240, parseInt(cfg.posterWidth || 400, 10));
     var staging = createEl('div', 'teposter-staging');
 
-    var root = createEl('div', 'teposter-root');
+    var root = createEl('div', 'teposter-root teposter-default');
     root.style.width = width + 'px';
 
-    // Header with logo (top-left)
-    var header = createEl('div', 'teposter-header');
     if (cfg.logoUrl) {
+      var header = createEl('div', 'teposter-header');
       var logoImg = createEl('img', 'teposter-logo');
       logoImg.src = cfg.logoUrl;
       logoImg.alt = 'logo';
       logoImg.crossOrigin = 'anonymous';
       header.appendChild(logoImg);
+      root.appendChild(header);
     }
-    root.appendChild(header);
 
     var content = createEl('div', 'teposter-content');
     var title = createEl('div', 'teposter-title');
@@ -713,7 +840,7 @@
 
     content.appendChild(title);
     content.appendChild(randomWrap);
-    content.appendChild(summary);
+    if (data.summary) content.appendChild(summary);
     content.appendChild(qrWrap);
     root.appendChild(content);
 
@@ -749,15 +876,13 @@
 
     // Hero section with background image
     var hero = createEl('div', 'nt-hero');
-    var heroInfoTop = createEl('div', 'nt-hero-info nt-hero-info-top');
     var heroInfoBottom = createEl('div', 'nt-hero-info nt-hero-info-bottom');
     var titleEl = createEl('div', 'nt-title');
     titleEl.textContent = data.title;
     var summaryEl = createEl('div', 'nt-summary');
     summaryEl.textContent = data.summary;
     heroInfoBottom.appendChild(titleEl);
-    heroInfoBottom.appendChild(summaryEl);
-    hero.appendChild(heroInfoTop);
+    if (data.summary) heroInfoBottom.appendChild(summaryEl);
     hero.appendChild(heroInfoBottom);
 
     // Top-left date
@@ -783,7 +908,7 @@
     randomImg.loading = 'eager';
     randomImg.decoding = 'async';
     function setSvgPlaceholder() {
-      var svg = encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#7b90ff" offset="0"/><stop stop-color="#b35fff" offset="1"/></linearGradient></defs><rect fill="url(#g)" width="1600" height="900"/></svg>');
+      var svg = encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#d9dde3" offset="0"/><stop stop-color="#aeb6c2" offset="1"/></linearGradient></defs><rect fill="url(#g)" width="1600" height="900"/></svg>');
       hero.style.backgroundImage = 'url("data:image/svg+xml;charset=utf-8,' + svg + '")';
     }
     var imageReadyPromise = chooseImageAndLoad(randomImg, function (url) {
@@ -846,25 +971,15 @@
     var root = createEl('div', 'teposter-root teposter-netease');
     root.style.width = width + 'px';
 
-    // 1. Top Image Area (Square)
+    // 1. Cover
     var imageWrap = createEl('div', 'netease-image-wrap');
-
-    // Title and Author INSIDE image area (bottom left)
-    var overlayInfo = createEl('div', 'netease-overlay-info');
-    var titleEl = createEl('div', 'netease-title');
-    titleEl.textContent = data.title;
-    var authorEl = createEl('div', 'netease-author');
-    authorEl.textContent = cfg.neteaseAuthor || 'Author';
-    overlayInfo.appendChild(titleEl);
-    overlayInfo.appendChild(authorEl);
-    imageWrap.appendChild(overlayInfo);
 
     var randomImg = new Image();
     randomImg.loading = 'eager';
     randomImg.decoding = 'async';
 
     function setSvgPlaceholder() {
-      var svg = encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="800" height="800"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#f5f5f5" offset="0"/><stop stop-color="#e0e0e0" offset="1"/></linearGradient></defs><rect fill="url(#g)" width="800" height="800"/></svg>');
+      var svg = encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600"><rect fill="#dde2e6" width="800" height="600"/></svg>');
       randomImg.src = 'data:image/svg+xml;charset=utf-8,' + svg;
     }
 
@@ -875,99 +990,97 @@
     imageWrap.appendChild(randomImg);
     root.appendChild(imageWrap);
 
-    // 2. Middle Area (Date + Description)
+    // 2. Article identity
+    var articleHead = createEl('div', 'netease-article-head');
+    var titleEl = createEl('div', 'netease-title');
+    titleEl.textContent = data.title;
+    articleHead.appendChild(titleEl);
+    if (cfg.postAuthor) {
+      var authorEl = createEl('div', 'netease-author');
+      authorEl.textContent = cfg.postAuthor;
+      articleHead.appendChild(authorEl);
+    }
+    root.appendChild(articleHead);
+
+    // 3. Date and excerpt
     var middleArea = createEl('div', 'netease-middle');
 
-    // Date (Month on top, Day below, no separator)
+    // Date (two rows and two aligned digit columns)
     var dateWrap = createEl('div', 'netease-date-wrap');
     var d = getPostDate() || new Date();
     var day = String(d.getDate());
     var month = String(d.getMonth() + 1); // 1-12
     if (month.length < 2) month = '0' + month;
+    if (day.length < 2) day = '0' + day;
 
-    var monthEl = createEl('div', 'netease-month');
-    monthEl.textContent = month;
-    var dayEl = createEl('div', 'netease-day');
-    dayEl.textContent = day;
+    function createDateLine(value, unitText) {
+      var line = createEl('div', 'netease-date-line');
+      var digits = createEl('div', 'netease-date-digits');
+      for (var i = 0; i < 2; i++) {
+        var digit = createEl('span', 'netease-date-digit');
+        digit.textContent = value.charAt(i);
+        digits.appendChild(digit);
+      }
+      var unit = createEl('span', 'netease-date-unit');
+      unit.textContent = unitText;
+      line.appendChild(digits);
+      line.appendChild(unit);
+      return line;
+    }
 
-    dateWrap.appendChild(monthEl);
-    dateWrap.appendChild(dayEl);
+    var monthLine = createDateLine(month, '月');
+    var dayLine = createDateLine(day, '日');
 
-    // Description (Article Summary)
+    dateWrap.appendChild(monthLine);
+    dateWrap.appendChild(dayLine);
+
+    // Article excerpt
+    var descWrap = createEl('div', 'netease-desc-wrap');
     var descEl = createEl('div', 'netease-desc');
     descEl.textContent = data.summary || '';
+    descWrap.appendChild(descEl);
 
     middleArea.appendChild(dateWrap);
-    middleArea.appendChild(descEl);
+    if (data.summary) {
+      middleArea.appendChild(descWrap);
+    } else {
+      middleArea.classList.add('no-summary');
+    }
     root.appendChild(middleArea);
 
-    // 3. Dotted Line
-    var dottedLine = createEl('div', 'netease-dotted-line');
-    root.appendChild(dottedLine);
-
-    // 4. Footer
+    // 4. Site identity and QR code
     var footer = createEl('div', 'netease-footer');
 
     // Left
     var footerLeft = createEl('div', 'netease-footer-left');
     var brandRow = createEl('div', 'netease-brand-row');
 
-    // Logo logic: If logoUrl exists, show ONLY logo. Else show dot + Site Name.
+    // Keep the configured logo treatment, with a clean site title as fallback.
     if (cfg.logoUrl) {
       var logo = createEl('img', 'netease-logo');
       logo.src = cfg.logoUrl;
+      logo.alt = cleanSiteTitle(cfg.siteTitle);
       logo.crossOrigin = 'anonymous';
       brandRow.appendChild(logo);
-
-      var divider = createEl('span', 'netease-brand-divider');
-      divider.textContent = '|';
-      brandRow.appendChild(divider);
-
-      var footerAuthor = createEl('span', 'netease-footer-author');
-      footerAuthor.textContent = cfg.neteaseAuthor || 'Author';
-      brandRow.appendChild(footerAuthor);
     } else {
-      var dot = createEl('div', 'netease-brand-dot');
-      brandRow.appendChild(dot);
-
       var siteName = createEl('span', 'netease-site-name');
-      siteName.textContent = cfg.siteTitle || 'Website';
+      siteName.textContent = cleanSiteTitle(cfg.siteTitle);
       brandRow.appendChild(siteName);
-
-      var divider = createEl('span', 'netease-brand-divider');
-      divider.textContent = '|';
-      brandRow.appendChild(divider);
-
-      var footerAuthor = createEl('span', 'netease-footer-author');
-      footerAuthor.textContent = cfg.neteaseAuthor || 'Author';
-      brandRow.appendChild(footerAuthor);
     }
 
     footerLeft.appendChild(brandRow);
 
     var scanText = createEl('div', 'netease-scan-text');
-    scanText.textContent = '扫码识别前往博客查看更多';
+    scanText.textContent = '长按识别二维码，阅读全文';
     footerLeft.appendChild(scanText);
 
     // Right (QR Code)
     var footerRight = createEl('div', 'netease-footer-right');
     var qrWrap = createEl('div', 'netease-qrcode');
 
-    // Add label overlay
-    var qrLabel = createEl('div', 'netease-qr-label');
-    var l1 = createEl('div'); l1.textContent = '二维码';
-    var l2 = createEl('div'); l2.textContent = '区域';
-    qrLabel.appendChild(l1);
-    qrLabel.appendChild(l2);
-    // Note: We append label but QRCode lib might clear or append to container. 
-    // Actually QRCode lib appends canvas/img. So label can sit absolutely on top if needed, 
-    // or we just let QRCode cover it. The user ref image shows a dark box with text.
-    // Let's assume the QR code covers it when generated.
-
-    var sizeNetease = (typeof cfg.qrSizeNetease !== 'undefined') ? parseInt(cfg.qrSizeNetease, 10) : 80;
-    var qrSizeInline = Math.max(40, sizeNetease || 80);
-    qrWrap.style.width = qrSizeInline + 'px';
-    qrWrap.style.height = qrSizeInline + 'px';
+    var sizeNetease = 72;
+    qrWrap.style.width = '80px';
+    qrWrap.style.height = '80px';
 
     footerRight.appendChild(qrWrap);
     footer.appendChild(footerLeft);
@@ -979,11 +1092,10 @@
 
     // Generate QR
     try {
-      var size = Math.max(40, sizeNetease || 80);
       new QRCode(qrWrap, {
         text: data.url,
-        width: size,
-        height: size,
+        width: sizeNetease,
+        height: sizeNetease,
         colorDark: '#000000',
         colorLight: '#ffffff',
         correctLevel: QRCode.CorrectLevel.M
@@ -995,28 +1107,194 @@
     return { staging: staging, root: root, ready: Promise.resolve(imageReadyPromise) };
   }
 
+  function getSiteFaviconUrl() {
+    var links = document.querySelectorAll('link[rel][href]');
+    var bestUrl = '';
+    var bestScore = -1;
+    for (var i = 0; i < links.length; i++) {
+      var rel = String(links[i].getAttribute('rel') || '').toLowerCase();
+      var relTokens = rel.split(/\s+/);
+      if (relTokens.indexOf('icon') === -1) continue;
+      var href = normalizeUrlMaybe(links[i].getAttribute('href'));
+      if (!href) continue;
+      var score = relTokens.indexOf('shortcut') !== -1 ? 1000 : 900;
+      var sizes = String(links[i].getAttribute('sizes') || '');
+      var match = sizes.match(/(\d+)x(\d+)/i);
+      if (match) score += Math.max(parseInt(match[1], 10), parseInt(match[2], 10));
+      if (sizes.toLowerCase() === 'any') score += 512;
+      if (score > bestScore) {
+        bestScore = score;
+        bestUrl = href;
+      }
+    }
+    return bestUrl;
+  }
+
+  function cleanSiteTitle(title) {
+    var value = String(title || '').trim();
+    var first = value.split(/[-丨]/)[0].trim();
+    return first || value || location.hostname || 'Website';
+  }
+
+  function cleanPageTitle(title, siteTitle) {
+    var value = String(title || '').trim();
+    var site = String(siteTitle || '').trim();
+    if (!value || !site) return value;
+
+    var siteNames = [site, cleanSiteTitle(site)];
+    for (var i = 0; i < siteNames.length; i++) {
+      var name = String(siteNames[i] || '').trim();
+      if (!name || siteNames.indexOf(name) !== i) continue;
+      var escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      var suffix = new RegExp('\\s*[-–—|丨]\\s*' + escaped + '\\s*$', 'i');
+      if (suffix.test(value)) return value.replace(suffix, '').trim();
+    }
+    return value;
+  }
+
+  function buildPosterDomMinimal(data) {
+    var width = Math.max(240, parseInt(cfg.posterWidth || 400, 10));
+    var staging = createEl('div', 'teposter-staging');
+    var root = createEl('div', 'teposter-root teposter-minimal');
+    root.style.width = width + 'px';
+
+    var coverWrap = createEl('div', 'minimal-cover');
+    var cover = new Image();
+    cover.loading = 'eager';
+    cover.decoding = 'async';
+    function setCoverPlaceholder() {
+      var svg = encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="800" height="800"><rect fill="#2a2d2c" width="800" height="800"/></svg>');
+      cover.src = 'data:image/svg+xml;charset=utf-8,' + svg;
+    }
+    var coverReadyPromise = chooseImageAndLoad(cover, function () { }, setCoverPlaceholder);
+    coverWrap.appendChild(cover);
+    root.appendChild(coverWrap);
+
+    var copy = createEl('div', 'minimal-copy');
+    var title = createEl('div', 'minimal-title');
+    title.textContent = data.title;
+    copy.appendChild(title);
+    if (data.summary) {
+      var summary = createEl('div', 'minimal-summary');
+      summary.textContent = data.summary;
+      copy.appendChild(summary);
+    }
+    root.appendChild(copy);
+
+    var footer = createEl('div', 'minimal-footer');
+    var brand = createEl('div', 'minimal-brand');
+    var favicon = createEl('img', 'minimal-favicon');
+    favicon.alt = '';
+    favicon.style.display = 'none';
+    var siteName = createEl('div', 'minimal-site-name');
+    var useAuthorIdentity = cfg.minimalIdentity === 'author' && String(cfg.postAuthor || '').trim().length > 0;
+    var identityType = useAuthorIdentity ? 'avatar' : 'favicon';
+    siteName.textContent = useAuthorIdentity ? cfg.postAuthor : cleanSiteTitle(cfg.siteTitle);
+    brand.appendChild(favicon);
+    brand.appendChild(siteName);
+    footer.appendChild(brand);
+
+    var qrWrap = createEl('div', 'minimal-qrcode');
+    footer.appendChild(qrWrap);
+    root.appendChild(footer);
+
+    staging.appendChild(root);
+    document.body.appendChild(staging);
+
+    try {
+      new QRCode(qrWrap, {
+        text: data.url,
+        width: 44,
+        height: 44,
+        colorDark: '#1c1f1e',
+        colorLight: '#f5f5f2',
+        correctLevel: QRCode.CorrectLevel.M
+      });
+    } catch (e) {
+      qrWrap.style.display = 'none';
+      console.error('QRCode error', e);
+    }
+
+    var identityCandidates = [];
+    var seenIdentityUrls = {};
+
+    function appendIdentityCandidates(url, type) {
+      getSameSiteUploadCandidates(url).forEach(function (candidateUrl) {
+        if (!candidateUrl || seenIdentityUrls[candidateUrl]) return;
+        seenIdentityUrls[candidateUrl] = true;
+        identityCandidates.push({ url: candidateUrl, type: type });
+      });
+    }
+
+    if (useAuthorIdentity) {
+      appendIdentityCandidates(cfg.postAuthorAvatar, 'avatar');
+    } else {
+      appendIdentityCandidates(getSiteFaviconUrl(), 'favicon');
+    }
+
+    var faviconReadyPromise = new Promise(function (resolve) {
+      function loadNext(index) {
+        if (index >= identityCandidates.length) return resolve();
+        var candidate = identityCandidates[index];
+        var url = candidate.url;
+        var settled = false;
+        var timer = null;
+        function finish(loaded) {
+          if (settled) return;
+          settled = true;
+          if (timer) clearTimeout(timer);
+          favicon.onload = null;
+          favicon.onerror = null;
+          if (loaded) {
+            favicon.className = 'minimal-favicon' + (identityType === 'avatar' ? ' is-avatar' : ' is-favicon');
+            favicon.alt = identityType === 'avatar' ? (cfg.postAuthor || '文章作者') : cleanSiteTitle(cfg.siteTitle);
+            favicon.style.display = 'block';
+            return resolve();
+          }
+          loadNext(index + 1);
+        }
+        favicon.onload = function () { finish(favicon.naturalWidth > 0); };
+        favicon.onerror = function () { finish(false); };
+        timer = setTimeout(function () { finish(false); }, 2200);
+        setImageCorsMode(favicon, url);
+        favicon.referrerPolicy = 'no-referrer';
+        favicon.src = url;
+        if (favicon.complete) setTimeout(favicon.onload, 0);
+      }
+      loadNext(0);
+    });
+
+    return {
+      staging: staging,
+      root: root,
+      ready: Promise.all([coverReadyPromise, faviconReadyPromise])
+    };
+  }
+
   function generatePoster() {
+    if (generatePoster._p) return generatePoster._p;
+    syncPageConfig();
     setLoading(true, '加载组件中...');
     // Ensure dependencies exist (handles SPA first click)
     var depsReady = ensureDepsReady(true);
-    return Promise.resolve(depsReady).then(function () {
+    var task = Promise.resolve(depsReady).then(function () {
       if (typeof html2canvas === 'undefined') {
         throw new Error('html2canvas not ready');
       }
       setLoading(true, '海报生成中...');
       // Prefer on-page article title, avoid site <title>
-      var pageTitle = getTextFromSelectors(['.article-info-title', '.post_info h1', '.post-title', 'article h1', '#article-info h1']) || getMeta('og:title', true) || getMeta('twitter:title', true) || document.title || '';
+      var pageTitle = getTextFromSelectors([
+        '.entry-title', '.wp-block-post-title', '.post__title', '.post-detail__title',
+        '.post_text_title', '.article-info-title', '.article-title', '.post-title',
+        '.post_header h1', '.post-header h1', '.post_nothumb h1', '.post_info h1',
+        '#article-info h1', '[itemprop="headline"]', 'article h1'
+      ]) || getMeta('og:title', true) || getMeta('twitter:title', true) || document.title || '';
+      pageTitle = cleanPageTitle(pageTitle, cfg.siteTitle);
       var fullText = detectArticleText();
       if (!fullText) {
         fullText = sanitizeSummaryText(getMeta('description', false) || getMeta('og:description', true) || getMeta('twitter:description', true) || '');
       }
-      var summaryLimit = parseInt(cfg.summaryLength, 10);
-      if (!summaryLimit || summaryLimit < 20) summaryLimit = 120;
-      if (summaryLimit > 300) summaryLimit = 300;
       var summary = fullText;
-      if (summary && summary.length > summaryLimit) {
-        summary = summary.slice(0, summaryLimit).replace(/\s+$/g, '') + '...';
-      }
       var data = { title: pageTitle, summary: summary, url: location.href };
 
       var dom;
@@ -1024,6 +1302,8 @@
         dom = buildPosterDomNinetheme(data);
       } else if (cfg.posterStyle === 'netease') {
         dom = buildPosterDomNetease(data);
+      } else if (cfg.posterStyle === 'minimal') {
+        dom = buildPosterDomMinimal(data);
       } else {
         dom = buildPosterDomDefault(data);
       }
@@ -1038,10 +1318,10 @@
       if (estPixels > maxPixels) {
         scale = Math.max(1, Math.sqrt(maxPixels / (rect.width * rect.height)));
       }
-      Promise.resolve(dom.ready).then(function () {
+      return Promise.resolve(dom.ready).then(function () {
         return html2canvas(dom.root, {
           useCORS: true,
-          backgroundColor: '#ffffff',
+          backgroundColor: cfg.posterStyle === 'minimal' ? '#1c1f1e' : '#ffffff',
           scale: scale,
           willReadFrequently: true
         });
@@ -1069,16 +1349,20 @@
         }
         body.innerHTML = '';
         var img = createEl('img');
-        img.src = imgData.url;
+        img.alt = '生成的文章海报';
         if (imgData.objectUrl) {
           img.setAttribute('data-teposter-object-url', '1');
         }
-        img.style.maxWidth = '100%';
-        img.style.height = 'auto';
-        img.style.objectFit = 'contain';
-        // Fit within viewport: scale down via container flex centering (CSS)
+        backdrop._teposterFit = function () {
+          fitPosterPreview(backdrop, img, cfg.posterStyle || 'default');
+        };
+        img.addEventListener('load', backdrop._teposterFit);
+        img.src = imgData.url;
         body.appendChild(img);
+        backdrop._teposterFit();
         backdrop.style.display = 'flex';
+        var modal = backdrop.querySelector('.teposter-modal');
+        if (modal && modal.focus) modal.focus();
       }).catch(function (err) {
         console.error(err);
         showToast('生成失败');
@@ -1091,6 +1375,14 @@
       showToast('组件加载失败');
       setLoading(false);
     });
+    generatePoster._p = task.then(function (result) {
+      generatePoster._p = null;
+      return result;
+    }, function (error) {
+      generatePoster._p = null;
+      throw error;
+    });
+    return generatePoster._p;
   }
 
   // auto insert removed
@@ -1101,29 +1393,10 @@
     prewarmDeps._p = Promise.resolve().then(function () {
       return ensureDepsReady(true);
     }).catch(function () {
-      // Keep silent in prewarm stage, actual click will show errors.
+      prewarmDeps._started = false;
+      prewarmDeps._p = null;
     });
     return prewarmDeps._p;
-  }
-
-  function bindButtonPrewarm(btn) {
-    if (!btn || btn._teposterPrewarmBound) return;
-    btn._teposterPrewarmBound = true;
-    var onceOpts = { once: true, passive: true };
-    try { btn.addEventListener('mouseenter', prewarmDeps, onceOpts); } catch (_) { }
-    try { btn.addEventListener('touchstart', prewarmDeps, onceOpts); } catch (_) { }
-    try { btn.addEventListener('focus', prewarmDeps, { once: true }); } catch (_) { }
-  }
-
-  function wireManualButton() {
-    var btn = document.getElementById('teposter-generate');
-    if (btn && !btn._teposterBound) {
-      btn.addEventListener('click', generatePoster);
-      btn._teposterBound = true;
-    }
-    if (btn) {
-      bindButtonPrewarm(btn);
-    }
   }
 
   function ready(fn) {
@@ -1140,37 +1413,14 @@
     if (window.__TEPosterPrewarmBoundV1) return;
     window.__TEPosterPrewarmBoundV1 = true;
 
-    function warmOnIntent() {
-      prewarmDeps();
-      try { document.removeEventListener('pointerdown', warmOnIntent, true); } catch (_) { }
-      try { document.removeEventListener('keydown', warmOnIntent, true); } catch (_) { }
-      try { document.removeEventListener('touchstart', warmOnIntent, true); } catch (_) { }
+    function warmOnButtonIntent(e) {
+      var target = e.target;
+      var button = target && (target.id === 'teposter-generate' ? target : (target.closest && target.closest('#teposter-generate')));
+      if (button) prewarmDeps();
     }
 
-    try { document.addEventListener('pointerdown', warmOnIntent, { once: true, capture: true, passive: true }); } catch (_) { }
-    try { document.addEventListener('touchstart', warmOnIntent, { once: true, capture: true, passive: true }); } catch (_) { }
-    try { document.addEventListener('keydown', warmOnIntent, { once: true, capture: true }); } catch (_) { }
-
-    try {
-      var btn = document.getElementById('teposter-generate');
-      if (btn && 'IntersectionObserver' in window) {
-        var io = new IntersectionObserver(function (entries) {
-          for (var i = 0; i < entries.length; i++) {
-            if (entries[i] && entries[i].isIntersecting) {
-              prewarmDeps();
-              try { io.disconnect(); } catch (_) { }
-              break;
-            }
-          }
-        }, { rootMargin: '120px 0px' });
-        io.observe(btn);
-      }
-    } catch (_) { }
-
-    try {
-      var idle = window.requestIdleCallback || function (cb) { return setTimeout(cb, 600); };
-      idle(function () { prewarmDeps(); });
-    } catch (_) { }
+    document.addEventListener('pointerover', warmOnButtonIntent, true);
+    document.addEventListener('focusin', warmOnButtonIntent, true);
   }
 
   function bindDelegatesOnce() {
@@ -1183,59 +1433,19 @@
       var hit = (t.id === 'teposter-generate') || (t.closest && t.closest('#teposter-generate'));
       if (hit) {
         try { e.preventDefault(); } catch (_) { }
-        try { e.stopPropagation(); } catch (_) { }
         return generatePoster();
       }
     }
-    document.addEventListener('click', delegate, true);
     document.addEventListener('click', delegate, false);
-    document.addEventListener('pointerup', delegate, true);
-    document.addEventListener('pointerup', delegate, false);
-
-    // Re-bind on common SPA/PJAX events
-    var spaEvents = [
-      'pjax:end', 'pjax:complete', 'pjax:success',
-      'turbolinks:load', 'turbo:load',
-      'instantclick:newpage', 'InstantClickChange',
-      'swup:contentReplaced', 'barba:after', 'htmx:afterSettle',
-      'pageshow', 'popstate', 'hashchange',
-      // Turbofley-style custom events (user-provided)
-      'turbofley:load', 'turbofley:ready', 'turbofley:navigate', 'turbofley:after'
-    ];
-    spaEvents.forEach(function (evt) {
-      window.addEventListener(evt, function () {
-        wireManualButton();
-      });
-      document.addEventListener(evt, function () {
-        wireManualButton();
-      });
-    });
-
-    // MutationObserver to bind once the button appears
-    try {
-      var mo = new MutationObserver(function () { wireManualButton(); });
-      mo.observe(document.documentElement || document.body, { childList: true, subtree: true });
-      // Stop observing after bind success
-      var checkBound = setInterval(function () {
-        var btn = document.getElementById('teposter-generate');
-        if (btn && btn._teposterBound) { try { mo.disconnect(); } catch (_) { } clearInterval(checkBound); }
-      }, 1000);
-      setTimeout(function () { try { mo.disconnect(); } catch (_) { } clearInterval(checkBound); }, 15000);
-    } catch (_) { }
   }
 
   ready(function () {
-    wireManualButton();
     bindPrewarmOnce();
     bindDelegatesOnce();
     // Expose for manual triggering if needed
     window.TEPoster = window.TEPoster || {};
     window.TEPoster.generate = generatePoster;
-    window.TEPoster.rebind = function () {
-      try { wireManualButton(); } catch (_) { }
-      try { bindDelegatesOnce(); } catch (_) { }
-    };
+    window.TEPoster.prewarm = prewarmDeps;
+    window.TEPoster.rebind = syncPageConfig;
   });
 })();
-
-

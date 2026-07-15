@@ -7,7 +7,7 @@ if (!defined('__TYPECHO_ROOT_DIR__')) {
  * 文章页生成海报，调用：TEPoster_Plugin::insertButton()
  * @package TEPoster
  * @author 森木志
- * @version 1.3.0
+	 * @version 1.11.0
  * @link https://oxxx.cn
  *
  */
@@ -35,171 +35,272 @@ class TEPoster_Plugin implements Typecho_Plugin_Interface
 	 */
 	public static function config(Typecho_Widget_Helper_Form $form)
 	{
-		// 顶部“通用设置”开关（点击展开/收起）
-		echo '<ul class="typecho-option" id="teposter-general-toggle" style="user-select:none;cursor:pointer;"><li><label class="typecho-label">通用设置</label><p class="description">点击展开/收起以下通用配置</p></li></ul>' . "\n";
-
 		$logoUrl = new Typecho_Widget_Helper_Form_Element_Text(
-			'logoUrl', null, '', _t('Logo URL'), _t('网站 Logo 图片地址（可选）。')
+			'logoUrl', null, '', _t('Logo URL'), _t('用于海报底部品牌区域；留空时显示网站标题。')
 		);
-		$form->addInput($logoUrl);
-
-		$unsplashKeywords = new Typecho_Widget_Helper_Form_Element_Text(
-			'unsplashKeywords', null, '', _t('Unsplash 关键词'), _t('随机图关键词（如 nature, city），留空则不限制。')
-		);
-		// 延后添加到 imageSource 下方
-
-		$unsplashAccessKey = new Typecho_Widget_Helper_Form_Element_Text(
-			'unsplashAccessKey', null, '', _t('Unsplash Access Key'), _t('在 Unsplash Developers 创建应用，填入 Access Key（前端调用随机图 API）。')
-		);
-		// 延后添加到 imageSource 下方
-
-		$customCoverField = new Typecho_Widget_Helper_Form_Element_Text(
-			'customCoverField', null, 'thumb', _t('自定义封面字段名'), _t('优先从该自定义字段取封面图（如 thumb）。支持的默认字段：image, thumb, thumbnail, cover, banner, headerImage, 以及它们的变体（如 header_image, image_url 等）。')
-		);
-		// 延后添加到 imageSource 下方
-
-		// 默认图自定义地址（仅在图片来源=默认图时展开）
-		$defaultImageUrl = new Typecho_Widget_Helper_Form_Element_Text(
-			'defaultImageUrl', null, '', _t('默认图 URL（可选）'), _t('仅在“图片来源=默认图”时使用；留空则使用插件内置 poster.webp。')
-		);
-		// 延后添加到 imageSource 下方
-
-		$imageSource = new Typecho_Widget_Helper_Form_Element_Radio(
-			'imageSource',
-			[
-				'default' => _t('默认图（assets/poster.webp）'),
-				'thumb' => _t('封面图优先（正文首图 → og:image）'),
-				'unsplash' => _t('Unsplash 随机图')
-			],
-			'default',
-			_t('图片来源'),
-			_t('未选择或选“默认图”时，使用插件内置的 poster.webp。')
-		);
-		// 注意：图片来源控件将放到“通用设置”分组之后再加入
 
 		$buttonClass = new Typecho_Widget_Helper_Form_Element_Text(
-			'buttonClass', null, 'teposter-btn', _t('按钮 CSS 类名'), _t('用于自定义按钮样式的类名，如果你使用的是OneBlog主题可以填写：submit')
+			'buttonClass', null, 'teposter-btn', _t('按钮 CSS 类名'), _t('用于适配主题中的海报按钮样式，例如 OneBlog 可填写 submit。')
 		);
-		$form->addInput($buttonClass);
 
 		$posterWidth = new Typecho_Widget_Helper_Form_Element_Text(
 			'posterWidth', null, '400', _t('海报宽度（px）'), _t('建议 360-600 之间。默认 400。')
 		);
-		$form->addInput($posterWidth);
 
-		// 二维码大小（按样式分别设置）
+		$imageSource = new Typecho_Widget_Helper_Form_Element_Radio(
+			'imageSource',
+			[
+				'default' => _t('默认图'),
+				'thumb' => _t('文章封面优先'),
+				'unsplash' => _t('Unsplash 随机图')
+			],
+			'default',
+			_t('图片来源'),
+			_t('文章封面模式会依次尝试自定义字段、正文首图和 og:image。')
+		);
+
+		$defaultImageUrl = new Typecho_Widget_Helper_Form_Element_Text(
+			'defaultImageUrl', null, '', _t('默认图 URL'), _t('留空时使用插件内置的 assets/poster.webp。')
+		);
+
+		$customCoverField = new Typecho_Widget_Helper_Form_Element_Text(
+			'customCoverField', null, 'thumb', _t('自定义封面字段'), _t('文章封面模式优先读取该字段，例如 thumb。')
+		);
+
+		$unsplashAccessKey = new Typecho_Widget_Helper_Form_Element_Text(
+			'unsplashAccessKey', null, '', _t('Unsplash Access Key'), _t('在 Unsplash Developers 创建应用后填写 Access Key。')
+		);
+
+		$unsplashKeywords = new Typecho_Widget_Helper_Form_Element_Text(
+			'unsplashKeywords', null, '', _t('Unsplash 关键词'), _t('例如 nature、city；留空时不限制主题。')
+		);
+
+		$posterStyle = new Typecho_Widget_Helper_Form_Element_Radio(
+			'posterStyle',
+			[
+				'default' => _t('默认'),
+				'ninetheme' => _t('ninetheme'),
+				'netease' => _t('网易云'),
+				'minimal' => _t('深色卡片')
+			],
+			'default',
+			_t('海报样式'),
+			_t('选择文章海报的排版样式。')
+		);
+
 		$qrSizeDefault = new Typecho_Widget_Helper_Form_Element_Text(
-			'qrSizeDefault', null, '130', _t('默认样式：二维码大小（px）'), _t('默认样式的二维码边长，默认 130。')
+			'qrSizeDefault', null, '130', _t('二维码大小（px）'), _t('默认样式使用，默认 130。')
 		);
-		// 延后添加到 posterStyle 下方
-		$qrSizeNinetheme = new Typecho_Widget_Helper_Form_Element_Text(
-			'qrSizeNinetheme', null, '75', _t('ninetheme：二维码大小（px）'), _t('ninetheme 样式的二维码边长，默认 75。')
-		);
-		// 延后添加到 posterStyle 下方
-		$qrSizeNetease = new Typecho_Widget_Helper_Form_Element_Text(
-			'qrSizeNetease', null, '80', _t('网易云：二维码大小（px）'), _t('网易云样式的二维码边长，默认 80。')
-		);
-		// 延后添加到 posterStyle 下方
 
-		$summaryLength = new Typecho_Widget_Helper_Form_Element_Text(
-			'summaryLength', null, '60', _t('摘要字数'), _t('默认 60（按字符数截取，仅在行数归并策略前使用）。')
+		$qrSizeNinetheme = new Typecho_Widget_Helper_Form_Element_Text(
+			'qrSizeNinetheme', null, '75', _t('二维码大小（px）'), _t('ninetheme 样式使用，默认 75。')
 		);
-		$form->addInput($summaryLength);
+
+		$ntBrandDesc = new Typecho_Widget_Helper_Form_Element_Text(
+			'ntBrandDesc', null, '', _t('底部品牌描述'), _t('ninetheme 样式中显示在网站名称下方。')
+		);
+
+		$minimalIdentity = new Typecho_Widget_Helper_Form_Element_Radio(
+			'minimalIdentity',
+			[
+				'site' => _t('网站信息'),
+				'author' => _t('文章作者')
+			],
+			'site',
+			_t('深色卡片底部'),
+			_t('选择显示圆形 favicon 与网站名，或圆形作者头像与作者名。')
+		);
 
 		$assetSource = new Typecho_Widget_Helper_Form_Element_Radio(
 			'assetSource',
 			[
-				'local' => _t('本地内置（推荐）'),
-				'cdn' => _t('外部 CDN（使用下方地址）')
+				'local' => _t('本地文件（推荐）'),
+				'cdn' => _t('外部 CDN')
 			],
 			'local',
-			_t('依赖加载方式'),
-			_t('选择二维码与海报生成脚本的加载来源。')
+			_t('依赖来源'),
+			_t('控制 html2canvas 与 qrcode.js 的加载地址。')
 		);
-		$form->addInput($assetSource);
 
 		$cdnHtml2canvasUrl = new Typecho_Widget_Helper_Form_Element_Text(
-			'cdnHtml2canvasUrl', null, 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js', _t('html2canvas 地址'), _t('可使用 CDN 或本地文件地址。')
+			'cdnHtml2canvasUrl', null, 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js', _t('html2canvas CDN 地址'), _t('仅在依赖来源选择外部 CDN 时使用。')
 		);
-		$form->addInput($cdnHtml2canvasUrl);
 
 		$cdnQrcodeUrl = new Typecho_Widget_Helper_Form_Element_Text(
-			'cdnQrcodeUrl', null, 'https://cdn.jsdelivr.net/npm/qrcodejs2@0.0.2/qrcode.min.js', _t('qrcode.js 地址'), _t('可使用 CDN 或本地文件地址。')
+			'cdnQrcodeUrl', null, 'https://cdn.jsdelivr.net/npm/qrcodejs2@0.0.2/qrcode.min.js', _t('qrcode.js CDN 地址'), _t('仅在依赖来源选择外部 CDN 时使用。')
 		);
-		$form->addInput($cdnQrcodeUrl);
 
 		$customCss = new Typecho_Widget_Helper_Form_Element_Textarea(
 			'customCss', null, '', _t('自定义 CSS'), _t('附加到海报与按钮的自定义样式。')
 		);
-		$form->addInput($customCss);
 
-		// 标记“通用设置”分组
-		try {
-			$logoUrl->container->setAttribute('data-teposter-group', 'general');
-			$buttonClass->container->setAttribute('data-teposter-group', 'general');
-			$posterWidth->container->setAttribute('data-teposter-group', 'general');
-			$summaryLength->container->setAttribute('data-teposter-group', 'general');
-			$assetSource->container->setAttribute('data-teposter-group', 'general');
-			$cdnHtml2canvasUrl->container->setAttribute('data-teposter-group', 'general');
-			$cdnQrcodeUrl->container->setAttribute('data-teposter-group', 'general');
-			$customCss->container->setAttribute('data-teposter-group', 'general');
-		} catch (\Throwable $e) {}
-
-		// 现在加入“图片来源”控件以及其下方的附属设置，确保位置在通用设置之后
-		$form->addInput($imageSource);
-		$form->addInput($defaultImageUrl);
-		$form->addInput($customCoverField);
-		$form->addInput($unsplashAccessKey);
-		$form->addInput($unsplashKeywords);
-
-		// 海报样式选择
-		$posterStyle = new Typecho_Widget_Helper_Form_Element_Radio(
-			'posterStyle',
-			[
-				'default' => _t('默认样式'),
-				'ninetheme' => _t('ninetheme 样式'),
-				'netease' => _t('网易云样式')
-			],
-			'default',
-			_t('海报样式'),
-			_t('选择不同的海报排版风格。')
-		);
-		$form->addInput($posterStyle);
-
-		// 将不同样式的专属设置插入在样式单选框下方
-		$form->addInput($qrSizeDefault);
-		$form->addInput($qrSizeNinetheme);
-		$form->addInput($qrSizeNetease);
-
-		// ninetheme 样式专属设置
-		$ntBrandDesc = new Typecho_Widget_Helper_Form_Element_Text(
-			'ntBrandDesc', null, '', _t('ninetheme：描述'), _t('显示在名称下方的一行描述。')
-		);
-		$form->addInput($ntBrandDesc);
-
-		// 网易云 样式专属设置
-		$neteaseAuthor = new Typecho_Widget_Helper_Form_Element_Text(
-			'neteaseAuthor', null, '作者昵称', _t('网易云：作者昵称'), _t('显示在图片内部左下角和底部的作者昵称。')
-		);
-		$form->addInput($neteaseAuthor);
-
-		// 设置项显隐逻辑：根据海报样式 / 图片来源切换
 		try {
 			$qrSizeDefault->container->setAttribute('data-teposter-show-when', 'style:default');
 			$qrSizeNinetheme->container->setAttribute('data-teposter-show-when', 'style:ninetheme');
 			$ntBrandDesc->container->setAttribute('data-teposter-show-when', 'style:ninetheme');
-			$qrSizeNetease->container->setAttribute('data-teposter-show-when', 'style:netease');
-			$neteaseAuthor->container->setAttribute('data-teposter-show-when', 'style:netease');
+			$minimalIdentity->container->setAttribute('data-teposter-show-when', 'style:minimal');
 			$defaultImageUrl->container->setAttribute('data-teposter-show-when', 'source:default');
 			$customCoverField->container->setAttribute('data-teposter-show-when', 'source:thumb');
 			$unsplashAccessKey->container->setAttribute('data-teposter-show-when', 'source:unsplash');
 			$unsplashKeywords->container->setAttribute('data-teposter-show-when', 'source:unsplash');
 			$cdnHtml2canvasUrl->container->setAttribute('data-teposter-show-when', 'asset:cdn');
 			$cdnQrcodeUrl->container->setAttribute('data-teposter-show-when', 'asset:cdn');
+			foreach ([$assetSource, $cdnHtml2canvasUrl, $cdnQrcodeUrl, $customCss] as $advancedField) {
+				$advancedField->container->setAttribute('data-teposter-section', 'advanced');
+			}
 		} catch (\Throwable $e) {}
 
-		// 注入控制显隐脚本（通用设置折叠 + 条件展开）
-		echo '<script>(function(){function sh(){var s=(document.querySelector("input[name=posterStyle]:checked")||{}).value||"default";var src=(document.querySelector("input[name=imageSource]:checked")||{}).value||"default";var asset=(document.querySelector("input[name=assetSource]:checked")||{}).value||"local";document.querySelectorAll("[data-teposter-show-when]").forEach(function(el){var v=el.getAttribute("data-teposter-show-when");if(!v)return;var ok=false;v.split(" ").forEach(function(rule){var p=rule.split(":");if(p.length<2)return;if(p[0]==="style"&&p[1]===s)ok=true; if(p[0]==="source"&&p[1]===src)ok=true; if(p[0]==="asset"&&p[1]===asset)ok=true;});el.style.display=ok?"":"none";});}function initGeneral(){var t=document.getElementById("teposter-general-toggle");var list=[].slice.call(document.querySelectorAll("[data-teposter-group=general]"));if(!t||!list.length)return;var opened=false;function apply(){list.forEach(function(el){el.style.display=opened?"":"none";});var imgSrc=document.querySelector("#typecho-option-item-imageSource-"),ref=imgSrc&&imgSrc.parentNode; if(ref&&opened){ var g=document.querySelector("[data-teposter-group=general]"); if(g){ ref.insertBefore(g.parentNode, imgSrc); } } }t.addEventListener("click",function(){opened=!opened;apply();});apply();}document.addEventListener("change",function(e){if(e.target&&e.target.name&&(e.target.name==="posterStyle"||e.target.name==="imageSource"||e.target.name==="assetSource")){sh();}});if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",function(){sh();initGeneral();});}else{sh();initGeneral();}})();</script>' . "\n";
+		$form->setAttribute('class', 'teposter-admin-form');
+
+		self::addConfigSection($form, 'basic', _t('基础设置'), _t('网站品牌、触发按钮和海报内容范围。'));
+		$form->addInput($logoUrl);
+		$form->addInput($buttonClass);
+		$form->addInput($posterWidth);
+
+		self::addConfigSection($form, 'image', _t('图片设置'), _t('选择海报封面的获取方式。'));
+		$form->addInput($imageSource);
+		$form->addInput($defaultImageUrl);
+		$form->addInput($customCoverField);
+		$form->addInput($unsplashAccessKey);
+		$form->addInput($unsplashKeywords);
+
+		self::addConfigSection($form, 'style', _t('样式设置'), _t('选择版式并调整当前样式支持的选项。'));
+		$form->addInput($posterStyle);
+		$form->addInput($qrSizeDefault);
+		$form->addInput($qrSizeNinetheme);
+		$form->addInput($ntBrandDesc);
+		$form->addInput($minimalIdentity);
+
+		self::addConfigSection($form, 'advanced', _t('高级设置'), _t('依赖来源、CDN 地址与自定义 CSS。'), true);
+		$form->addInput($assetSource);
+		$form->addInput($cdnHtml2canvasUrl);
+		$form->addInput($cdnQrcodeUrl);
+		$form->addInput($customCss);
+
+		echo <<<'TEPOSTER_ADMIN'
+<style>
+.teposter-admin-form { max-width: 720px; }
+.teposter-admin-section { margin: 32px 0 18px; padding-top: 26px; border-top: 1px solid #e2e5e8; }
+.teposter-admin-section.is-first { margin-top: 4px; padding-top: 0; border-top: 0; }
+.teposter-admin-section h3 { margin: 0; color: #2f3337; font-size: 18px; line-height: 1.35; }
+.teposter-admin-section p { margin: 6px 0 0; color: #8a9097; font-size: 13px; line-height: 1.6; }
+.teposter-admin-section-toggle { width: 100%; padding: 0; border: 0; background: transparent; color: inherit; cursor: pointer; display: flex; align-items: center; justify-content: space-between; text-align: left; }
+.teposter-admin-section-toggle:focus { outline: 2px solid #467b96; outline-offset: 4px; }
+.teposter-admin-section-icon { flex: 0 0 auto; color: #667078; font-size: 20px; font-weight: 400; line-height: 1; }
+.teposter-admin-form > ul.typecho-option { margin-bottom: 18px; }
+.teposter-admin-form > ul.typecho-option > li > span { display: inline-flex; align-items: center; max-width: 100%; margin: 0 20px 8px 0; white-space: normal; }
+.teposter-admin-form > ul.typecho-option > li > span label { margin-left: 5px; overflow-wrap: anywhere; }
+.teposter-admin-form input.text,
+.teposter-admin-form textarea { width: 100%; max-width: 100%; box-sizing: border-box; }
+.teposter-admin-form textarea { min-height: 120px; resize: vertical; }
+@media (max-width: 767px) {
+  .teposter-admin-section { margin-top: 26px; padding-top: 22px; }
+  .teposter-admin-form > ul.typecho-option > li > span { display: flex; margin-right: 0; }
+}
+</style>
+<script>
+(function () {
+  function initTEPosterAdmin() {
+    var form = document.querySelector('form.teposter-admin-form');
+    if (!form || form.getAttribute('data-teposter-ready') === '1') return;
+    form.setAttribute('data-teposter-ready', '1');
+
+    var advancedOpen = false;
+    var advancedToggle = form.querySelector('[data-teposter-advanced-toggle]');
+
+    function currentValue(name, fallback) {
+      var checked = form.querySelector('input[name="' + name + '"]:checked');
+      return checked ? checked.value : fallback;
+    }
+
+    function matchesRule(field) {
+      var value = field.getAttribute('data-teposter-show-when');
+      if (!value) return true;
+      var state = {
+        style: currentValue('posterStyle', 'default'),
+        source: currentValue('imageSource', 'default'),
+        asset: currentValue('assetSource', 'local')
+      };
+      return value.split(' ').some(function (rule) {
+        var parts = rule.split(':');
+        return parts.length === 2 && state[parts[0]] === parts[1];
+      });
+    }
+
+    function refreshFields() {
+      var fields = form.querySelectorAll('[data-teposter-show-when], [data-teposter-section]');
+      Array.prototype.forEach.call(fields, function (field) {
+        var visible = matchesRule(field);
+        if (field.getAttribute('data-teposter-section') === 'advanced' && !advancedOpen) {
+          visible = false;
+        }
+        var row = field.closest ? field.closest('ul.typecho-option') : field.parentNode;
+        if (row) row.style.display = visible ? '' : 'none';
+      });
+    }
+
+    if (advancedToggle) {
+      advancedToggle.addEventListener('click', function () {
+        advancedOpen = !advancedOpen;
+        advancedToggle.setAttribute('aria-expanded', advancedOpen ? 'true' : 'false');
+        var icon = advancedToggle.querySelector('.teposter-admin-section-icon');
+        if (icon) icon.textContent = advancedOpen ? '-' : '+';
+        refreshFields();
+      });
+    }
+
+    form.addEventListener('change', function (event) {
+      var name = event.target && event.target.name;
+      if (name === 'posterStyle' || name === 'imageSource' || name === 'assetSource') {
+        refreshFields();
+      }
+    });
+
+    refreshFields();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initTEPosterAdmin);
+  } else {
+    initTEPosterAdmin();
+  }
+})();
+</script>
+TEPOSTER_ADMIN;
+	}
+
+	private static function addConfigSection(Typecho_Widget_Helper_Form $form, $id, $title, $description, $collapsible = false)
+	{
+		$className = 'teposter-admin-section' . ($id === 'basic' ? ' is-first' : '');
+		$section = new Typecho_Widget_Helper_Layout('div', [
+			'class' => $className,
+			'data-teposter-section-heading' => $id
+		]);
+
+		if ($collapsible) {
+			$toggle = new Typecho_Widget_Helper_Layout('button', [
+				'type' => 'button',
+				'class' => 'teposter-admin-section-toggle',
+				'data-teposter-advanced-toggle' => '1',
+				'aria-expanded' => 'false'
+			]);
+			$heading = new Typecho_Widget_Helper_Layout('h3');
+			$heading->html(htmlspecialchars($title, ENT_QUOTES, 'UTF-8'));
+			$icon = new Typecho_Widget_Helper_Layout('span', ['class' => 'teposter-admin-section-icon', 'aria-hidden' => 'true']);
+			$icon->html('+');
+			$toggle->addItem($heading);
+			$toggle->addItem($icon);
+			$section->addItem($toggle);
+		} else {
+			$heading = new Typecho_Widget_Helper_Layout('h3');
+			$heading->html(htmlspecialchars($title, ENT_QUOTES, 'UTF-8'));
+			$section->addItem($heading);
+		}
+
+		$summary = new Typecho_Widget_Helper_Layout('p');
+		$summary->html(htmlspecialchars($description, ENT_QUOTES, 'UTF-8'));
+		$section->addItem($summary);
+		$form->addItem($section);
 	}
 
 
@@ -215,7 +316,102 @@ class TEPoster_Plugin implements Typecho_Plugin_Interface
 		$options = Helper::options();
 		$pluginOptions = $options->plugin('TEPoster');
 		$buttonClass = !empty($pluginOptions->buttonClass) ? (string)$pluginOptions->buttonClass : 'teposter-btn';
-		echo '<div class="teposter-button-wrap"><button type="button" class="' . htmlspecialchars($buttonClass) . '" id="teposter-generate">' . _t('海报') . '</button></div>' . "\n";
+		$widget = Typecho_Widget::widget('Widget_Archive');
+		$postContext = self::getPostContext($widget, $pluginOptions);
+		echo '<div class="teposter-button-wrap"><button type="button" class="' . htmlspecialchars($buttonClass, ENT_QUOTES, 'UTF-8') . '" id="teposter-generate" data-teposter-post-cover="' . htmlspecialchars($postContext['cover'], ENT_QUOTES, 'UTF-8') . '" data-teposter-post-date="' . htmlspecialchars($postContext['date'], ENT_QUOTES, 'UTF-8') . '" data-teposter-post-author="' . htmlspecialchars($postContext['author'], ENT_QUOTES, 'UTF-8') . '" data-teposter-post-author-avatar="' . htmlspecialchars($postContext['authorAvatar'], ENT_QUOTES, 'UTF-8') . '">' . _t('海报') . '</button></div>' . "\n";
+	}
+
+	private static function getPostContext($widget, $pluginOptions)
+	{
+		$context = ['cover' => '', 'date' => '', 'author' => '', 'authorAvatar' => ''];
+		if (!$widget || !$widget->is('single')) {
+			return $context;
+		}
+
+		if (isset($widget->created) && is_numeric($widget->created)) {
+			$context['date'] = date('c', (int)$widget->created);
+		}
+		try {
+			$accountAuthor = isset($widget->author->screenName) ? trim((string)$widget->author->screenName) : '';
+			$customAuthor = '';
+			if (isset($widget->fields) && $widget->fields && isset($widget->fields->author)) {
+				$customAuthor = trim((string)$widget->fields->author);
+			}
+			$context['author'] = $customAuthor !== '' ? $customAuthor : $accountAuthor;
+			$usesDifferentCustomAuthor = $customAuthor !== '' && $customAuthor !== $accountAuthor;
+
+			if ($customAuthor !== '' && isset($widget->fields) && $widget->fields) {
+				foreach (['authorAvatar', 'author_avatar', 'avatarUrl', 'avatar_url', 'avatar'] as $avatarField) {
+					if (isset($widget->fields->{$avatarField}) && trim((string)$widget->fields->{$avatarField}) !== '') {
+						$customAvatar = trim((string)$widget->fields->{$avatarField});
+						if (strpos($customAvatar, '<') === false) {
+							$context['authorAvatar'] = $customAvatar;
+							break;
+						}
+					}
+				}
+			}
+
+			if ($context['authorAvatar'] === '' && !$usesDifferentCustomAuthor && isset($widget->author->mail) && trim((string)$widget->author->mail) !== '') {
+				$mail = trim((string)$widget->author->mail);
+				if (function_exists('getGravatar')) {
+					try {
+						$themeAvatar = trim((string)getGravatar($mail, 96));
+						if ($themeAvatar !== '' && strpos($themeAvatar, '<') === false) {
+							$context['authorAvatar'] = $themeAvatar;
+						}
+					} catch (\Throwable $e) {}
+				}
+				if ($context['authorAvatar'] === '' && class_exists('Typecho_Common')) {
+					$context['authorAvatar'] = Typecho_Common::gravatarUrl($mail, 96, 'G', 'identicon', true);
+				} elseif ($context['authorAvatar'] === '' && class_exists('Typecho\\Common')) {
+					$context['authorAvatar'] = \Typecho\Common::gravatarUrl($mail, 96, 'G', 'identicon', true);
+				}
+				$context['authorAvatar'] = html_entity_decode($context['authorAvatar'], ENT_QUOTES, 'UTF-8');
+			}
+		} catch (\Throwable $e) {}
+
+		try {
+			$fieldCandidates = [];
+			if (!empty($pluginOptions->customCoverField)) {
+				$fieldCandidates[] = (string)$pluginOptions->customCoverField;
+			}
+			$fieldCandidates = array_merge($fieldCandidates, [
+				'image',
+				'thumb',
+				'thumbnail',
+				'cover',
+				'banner',
+				'headerImage',
+				'imageUrl',
+				'img',
+				'imgUrl',
+				'postImage',
+				'bannerUrl',
+				'bannerurl',
+				'coverUrl',
+				'coverurl',
+				'header_image',
+				'image_url',
+				'img_url',
+				'post_image'
+			]);
+			$fieldCandidates = array_values(array_unique(array_filter($fieldCandidates)));
+			if (isset($widget->fields) && $widget->fields) {
+				foreach ($fieldCandidates as $fieldName) {
+					if (isset($widget->fields->{$fieldName}) && !empty($widget->fields->{$fieldName})) {
+						$context['cover'] = (string)$widget->fields->{$fieldName};
+						break;
+					}
+				}
+			}
+		} catch (\Throwable $e) {
+			if (defined('__TYPECHO_DEBUG__') && __TYPECHO_DEBUG__) {
+				error_log('TEPoster Plugin Error: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
+			}
+		}
+
+		return $context;
 	}
 
 	public static function footer($archive = null)
@@ -227,58 +423,13 @@ class TEPoster_Plugin implements Typecho_Plugin_Interface
 		$pluginUrl = rtrim($options->pluginUrl, '/') . '/TEPoster';
 		$pluginOptions = $options->plugin('TEPoster');
 
-		$postCustomCover = '';
-		if ($isSingle) {
-			try {
-				$fieldCandidates = [];
-				if (!empty($pluginOptions->customCoverField)) {
-					$fieldCandidates[] = (string)$pluginOptions->customCoverField;
-				}
-				$fieldCandidates = array_merge($fieldCandidates, [
-				// 最常用的字段优先
-				'image',
-				'thumb',
-				'thumbnail',
-				'cover',
-				'banner',
-				// 扩展字段
-				'headerImage',
-				'imageUrl',
-				'img',
-				'imgUrl',
-				'postImage',
-				// 驼峰和下划线变体
-				'bannerUrl',
-				'bannerurl',
-				'coverUrl',
-				'coverurl',
-				'header_image',
-				'image_url',
-				'img_url',
-				'post_image'
-			]);
-				$fieldCandidates = array_values(array_unique(array_filter($fieldCandidates)));
-				if (isset($widget->fields) && $widget->fields) {
-					foreach ($fieldCandidates as $fieldName) {
-						if (isset($widget->fields->{$fieldName}) && !empty($widget->fields->{$fieldName})) {
-							$postCustomCover = (string)$widget->fields->{$fieldName};
-							break;
-						}
-					}
-				}
-			} catch (\Throwable $e) {
-							// 记录错误日志，便于调试
-							if (defined('__TYPECHO_DEBUG__') && __TYPECHO_DEBUG__) {
-								error_log('TEPoster Plugin Error: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
-							}
-						}
-		}
+		$postContext = self::getPostContext($widget, $pluginOptions);
 
 		$assetSource = !empty($pluginOptions->assetSource) ? (string)$pluginOptions->assetSource : 'local';
 		$cdnHtml2canvasUrl = !empty($pluginOptions->cdnHtml2canvasUrl) ? (string)$pluginOptions->cdnHtml2canvasUrl : 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
 		$cdnQrcodeUrl = !empty($pluginOptions->cdnQrcodeUrl) ? (string)$pluginOptions->cdnQrcodeUrl : 'https://cdn.jsdelivr.net/npm/qrcodejs2@0.0.2/qrcode.min.js';
-		$localHtml2canvasUrl = $pluginUrl . '/assets/vendor/html2canvas.min.js';
-		$localQrcodeUrl = $pluginUrl . '/assets/vendor/qrcode.min.js';
+		$localHtml2canvasUrl = $pluginUrl . '/assets/vendor/html2canvas.min.js?v=1.4.1';
+		$localQrcodeUrl = $pluginUrl . '/assets/vendor/qrcode.min.js?v=0.0.2';
 
 		$cfg = [
 			'buttonClass' => !empty($pluginOptions->buttonClass) ? (string)$pluginOptions->buttonClass : 'teposter-btn',
@@ -286,19 +437,19 @@ class TEPoster_Plugin implements Typecho_Plugin_Interface
 			// 兼容旧版 qrSize：如存在则作为两者的后备
 			'qrSizeDefault' => isset($pluginOptions->qrSizeDefault) ? intval($pluginOptions->qrSizeDefault) : (isset($pluginOptions->qrSize) ? intval($pluginOptions->qrSize) : 130),
 			'qrSizeNinetheme' => isset($pluginOptions->qrSizeNinetheme) ? intval($pluginOptions->qrSizeNinetheme) : (isset($pluginOptions->qrSize) ? intval($pluginOptions->qrSize) : 75),
-			'qrSizeNetease' => isset($pluginOptions->qrSizeNetease) ? intval($pluginOptions->qrSizeNetease) : 80,
-			'summaryLength' => isset($pluginOptions->summaryLength) ? intval($pluginOptions->summaryLength) : 60,
 			'logoUrl' => !empty($pluginOptions->logoUrl) ? (string)$pluginOptions->logoUrl : '',
 			'unsplashKeywords' => !empty($pluginOptions->unsplashKeywords) ? (string)$pluginOptions->unsplashKeywords : '',
 			'unsplashAccessKey' => !empty($pluginOptions->unsplashAccessKey) ? (string)$pluginOptions->unsplashAccessKey : '',
 			'customCoverField' => !empty($pluginOptions->customCoverField) ? (string)$pluginOptions->customCoverField : 'thumb',
-			'postCustomCover' => $postCustomCover,
-			'postDateISO' => $isSingle ? date('c', $widget->created) : '',
+			'postCustomCover' => $postContext['cover'],
+			'postDateISO' => $postContext['date'],
+			'postAuthor' => $postContext['author'],
+			'postAuthorAvatar' => $postContext['authorAvatar'],
 			'imageSource' => !empty($pluginOptions->imageSource) ? (string)$pluginOptions->imageSource : 'default',
 			'posterStyle' => !empty($pluginOptions->posterStyle) ? (string)$pluginOptions->posterStyle : 'default',
+			'minimalIdentity' => !empty($pluginOptions->minimalIdentity) ? (string)$pluginOptions->minimalIdentity : 'site',
 			'siteTitle' => isset($options->title) ? (string)$options->title : '',
 			'ntBrandDesc' => !empty($pluginOptions->ntBrandDesc) ? (string)$pluginOptions->ntBrandDesc : '',
-			'neteaseAuthor' => !empty($pluginOptions->neteaseAuthor) ? (string)$pluginOptions->neteaseAuthor : '',
 			'assetsBase' => $pluginUrl . '/assets',
 			'defaultImage' => !empty($pluginOptions->defaultImageUrl) ? (string)$pluginOptions->defaultImageUrl : ($pluginUrl . '/assets/poster.webp'),
 			'cdnHtml2canvasUrl' => $cdnHtml2canvasUrl,
@@ -308,30 +459,12 @@ class TEPoster_Plugin implements Typecho_Plugin_Interface
 			'assetSource' => $assetSource,
 		];
 
-		echo '<link rel="stylesheet" href="' . $cfg['assetsBase'] . '/teposter.css?v=9" />' . "\n";
+		echo '<link rel="stylesheet" href="' . $cfg['assetsBase'] . '/teposter.css?v=20" />' . "\n";
 		if (!empty($pluginOptions->customCss)) {
 			echo '<style id="teposter-custom-css">' . $pluginOptions->customCss . '</style>' . "\n";
 		}
 
-		$qrLocalRaw = $cfg['localQrcodeUrl'];
-		$h2cLocalRaw = $cfg['localHtml2canvasUrl'];
-		$qrLocal = htmlspecialchars($qrLocalRaw);
-		$h2cLocal = htmlspecialchars($h2cLocalRaw);
-		if ($assetSource === 'cdn') {
-			$qrCdn = htmlspecialchars($cfg['cdnQrcodeUrl']);
-			$h2cCdn = htmlspecialchars($cfg['cdnHtml2canvasUrl']);
-			echo '<script src="' . $qrCdn . '" onerror="(function(){var s=document.createElement(\'script\');s.src=\'' . $qrLocalRaw . '\';document.head.appendChild(s);})();"></script>' . "\n";
-			echo '<script src="' . $h2cCdn . '" onerror="(function(){var s=document.createElement(\'script\');s.src=\'' . $h2cLocalRaw . '\';document.head.appendChild(s);})();"></script>' . "\n";
-		} else {
-			echo '<script src="' . $qrLocal . '"></script>' . "\n";
-			echo '<script src="' . $h2cLocal . '"></script>' . "\n";
-		}
-		$bootstrapFallback = "(function(){function f(){if(typeof QRCode==='undefined'){var s=document.createElement('script');s.src='" . addslashes($assetSource === 'cdn' ? $cfg['cdnQrcodeUrl'] : $qrLocalRaw) . "';document.head.appendChild(s);}if(typeof html2canvas==='undefined'){var s2=document.createElement('script');s2.src='" . addslashes($assetSource === 'cdn' ? $cfg['cdnHtml2canvasUrl'] : $h2cLocalRaw) . "';document.head.appendChild(s2);}}if(document.readyState==='complete'){setTimeout(f,300);}else{window.addEventListener('load',function(){setTimeout(f,300);});}})();";
-		echo '<script>' . $bootstrapFallback . '</script>' . "\n";
-
 		echo '<script>window.TEPosterConfig = ' . json_encode($cfg, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) . ';</script>' . "\n";
-		echo '<script src="' . $cfg['assetsBase'] . '/teposter.js?v=8"></script>' . "\n";
+		echo '<script src="' . $cfg['assetsBase'] . '/teposter.js?v=25"></script>' . "\n";
 	}
 }
-
-
