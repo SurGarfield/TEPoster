@@ -4,7 +4,6 @@ TEPoster：给 Typecho 文章生成分享海报
 
 ## 海报预览
 ![1](https://github.com/SurGarfield/TEPoster/blob/main/海报预览/1.png)
-![2](https://github.com/SurGarfield/TEPoster/blob/main/海报预览/2.png)
 
 ## 安装和接入主题
 
