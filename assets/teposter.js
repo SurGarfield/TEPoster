@@ -1005,34 +1005,19 @@
     // 3. Date and excerpt
     var middleArea = createEl('div', 'netease-middle');
 
-    // Date (two rows and two aligned digit columns)
+    // Date follows the default layout: day above, month and year below.
     var dateWrap = createEl('div', 'netease-date-wrap');
     var d = getPostDate() || new Date();
     var day = String(d.getDate());
-    var month = String(d.getMonth() + 1); // 1-12
-    if (month.length < 2) month = '0' + month;
     if (day.length < 2) day = '0' + day;
-
-    function createDateLine(value, unitText) {
-      var line = createEl('div', 'netease-date-line');
-      var digits = createEl('div', 'netease-date-digits');
-      for (var i = 0; i < 2; i++) {
-        var digit = createEl('span', 'netease-date-digit');
-        digit.textContent = value.charAt(i);
-        digits.appendChild(digit);
-      }
-      var unit = createEl('span', 'netease-date-unit');
-      unit.textContent = unitText;
-      line.appendChild(digits);
-      line.appendChild(unit);
-      return line;
-    }
-
-    var monthLine = createDateLine(month, '月');
-    var dayLine = createDateLine(day, '日');
-
-    dateWrap.appendChild(monthLine);
-    dateWrap.appendChild(dayLine);
+    var months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    var monthYear = months[d.getMonth()] + '.' + d.getFullYear();
+    var dateDay = createEl('div', 'netease-date-day');
+    var dateMonthYear = createEl('div', 'netease-date-monthyear');
+    dateDay.textContent = day;
+    dateMonthYear.textContent = monthYear;
+    dateWrap.appendChild(dateDay);
+    dateWrap.appendChild(dateMonthYear);
 
     // Article excerpt
     var descWrap = createEl('div', 'netease-desc-wrap');

@@ -459,12 +459,12 @@ TEPOSTER_ADMIN;
 			'assetSource' => $assetSource,
 		];
 
-		echo '<link rel="stylesheet" href="' . $cfg['assetsBase'] . '/teposter.css?v=20" />' . "\n";
+		echo '<link rel="stylesheet" href="' . $cfg['assetsBase'] . '/teposter.css?v=21" />' . "\n";
 		if (!empty($pluginOptions->customCss)) {
 			echo '<style id="teposter-custom-css">' . $pluginOptions->customCss . '</style>' . "\n";
 		}
 
 		echo '<script>window.TEPosterConfig = ' . json_encode($cfg, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) . ';</script>' . "\n";
-		echo '<script src="' . $cfg['assetsBase'] . '/teposter.js?v=25"></script>' . "\n";
+		echo '<script src="' . $cfg['assetsBase'] . '/teposter.js?v=26"></script>' . "\n";
 	}
 }
