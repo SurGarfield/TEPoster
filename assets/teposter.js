@@ -528,7 +528,10 @@
   function getImageProxyUrl(url) {
     var normalized = normalizeUrlMaybe(url);
     var proxyMap = cfg.imageProxyMap || {};
-    return normalized && typeof proxyMap[normalized] === 'string' ? proxyMap[normalized] : '';
+    var proxyUrl = normalized && typeof proxyMap[normalized] === 'string' ? proxyMap[normalized] : '';
+    if (!proxyUrl) return '';
+    try { return new URL(proxyUrl, location.origin).href; } catch (_) { }
+    return '';
   }
   function setImageCorsMode(img, url) {
     try {

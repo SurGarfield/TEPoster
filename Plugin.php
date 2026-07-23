@@ -525,14 +525,18 @@ TEPOSTER_ADMIN;
 		$map = [];
 		$secret = isset($options->secret) ? (string)$options->secret : '';
 		$siteIndex = isset($options->index) ? rtrim((string)$options->index, '/') : '';
-		$siteParts = $siteIndex !== '' ? parse_url($siteIndex) : false;
-		if ($secret === '' || !$siteParts || empty($siteParts['scheme']) || empty($siteParts['host'])) {
+		if ($secret === '' || $siteIndex === '') {
 			return $map;
 		}
 
-		$sitePort = isset($siteParts['port']) ? (int)$siteParts['port'] : (strtolower($siteParts['scheme']) === 'https' ? 443 : 80);
-		$siteOrigin = strtolower($siteParts['scheme']) . '://' . strtolower($siteParts['host']) . ':' . $sitePort;
 		$actionUrl = Typecho_Common::url('/action/teposter-image', $siteIndex);
+		$actionPath = parse_url($actionUrl, PHP_URL_PATH);
+		if (!is_string($actionPath) || $actionPath === '') {
+			$actionPath = '/action/teposter-image';
+		}
+		if ($actionPath[0] !== '/') {
+			$actionPath = '/' . $actionPath;
+		}
 
 		foreach ($urls as $url) {
 			$url = html_entity_decode(trim((string)$url), ENT_QUOTES, 'UTF-8');
@@ -540,13 +544,11 @@ TEPOSTER_ADMIN;
 			if (!$parts || empty($parts['scheme']) || empty($parts['host']) || !in_array(strtolower($parts['scheme']), ['http', 'https'], true)) {
 				continue;
 			}
-			$port = isset($parts['port']) ? (int)$parts['port'] : (strtolower($parts['scheme']) === 'https' ? 443 : 80);
-			$origin = strtolower($parts['scheme']) . '://' . strtolower($parts['host']) . ':' . $port;
-			if ($origin === $siteOrigin || isset($map[$url])) {
+			if (isset($map[$url])) {
 				continue;
 			}
 			$token = hash_hmac('sha256', $url, $secret);
-			$map[$url] = $actionUrl . '?url=' . rawurlencode($url) . '&token=' . rawurlencode($token);
+			$map[$url] = $actionPath . '?url=' . rawurlencode($url) . '&token=' . rawurlencode($token);
 		}
 
 		return $map;
@@ -610,6 +612,6 @@ TEPOSTER_ADMIN;
 		}
 
 		echo '<script>window.TEPosterConfig = ' . json_encode($cfg, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) . ';</script>' . "\n";
-		echo '<script src="' . $cfg['assetsBase'] . '/teposter.js?v=32"></script>' . "\n";
+		echo '<script src="' . $cfg['assetsBase'] . '/teposter.js?v=33"></script>' . "\n";
 	}
 }
