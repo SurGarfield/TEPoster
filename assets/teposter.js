@@ -525,6 +525,11 @@
     if (candidates.indexOf(normalized) === -1) candidates.push(normalized);
     return candidates;
   }
+  function getImageProxyUrl(url) {
+    var normalized = normalizeUrlMaybe(url);
+    var proxyMap = cfg.imageProxyMap || {};
+    return normalized && typeof proxyMap[normalized] === 'string' ? proxyMap[normalized] : '';
+  }
   function setImageCorsMode(img, url) {
     try {
       var parsed = new URL(url, location.href);
@@ -696,6 +701,8 @@
 
   function prepareBrandImage(img, url, fallbackNode) {
     var candidates = getSameSiteUploadCandidates(url);
+    var brandProxyUrl = getImageProxyUrl(url);
+    if (brandProxyUrl && candidates.indexOf(brandProxyUrl) === -1) candidates.push(brandProxyUrl);
     return new Promise(function (resolve) {
       function useFallback() {
         if (img && img.parentNode && fallbackNode) {
@@ -847,6 +854,12 @@
           if (seen[resolved]) return;
           seen[resolved] = true;
           candidates.push({ url: resolved, allowSmall: !!allowSmall });
+
+          var proxyUrl = getImageProxyUrl(resolved);
+          if (proxyUrl && !seen[proxyUrl]) {
+            seen[proxyUrl] = true;
+            candidates.push({ url: proxyUrl, allowSmall: !!allowSmall });
+          }
         });
       }
 

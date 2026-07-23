@@ -127,24 +127,28 @@
 }
 
 .teposter-download {
-  flex: 0 0 auto;
-  min-height: 38px;
-  padding: 9px 15px;
-  border: 0;
-  border-radius: 6px;
-  background: #286d8b;
-  color: #ffffff;
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 1.2;
+    flex: 0 0 auto;
+    min-height: 35px;
+    padding: 8px 12px;
+    border: 0;
+    border-radius: 4px;
+    background: #111111;
+    color: #ffffff;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.2;
 }
 
 .teposter-download:hover {
-  background: #215c76;
+  background: #000000;
 }
 
-.teposter-download:focus-visible,
+.teposter-download:focus-visible {
+  outline: 2px solid #111111;
+  outline-offset: 2px;
+}
+
 .teposter-close:focus-visible {
   outline: 2px solid #286d8b;
   outline-offset: 2px;

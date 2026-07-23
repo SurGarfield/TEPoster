@@ -1,16 +1,15 @@
 <?php
-if (!defined('__TYPECHO_ROOT_DIR__')) {
-	exit;
-}
-
 /**
  * 文章页生成海报，调用：TEPoster_Plugin::insertButton()
  * @package TEPoster
  * @author 森木志
-	 * @version 1.2.0
+ * @version 1.2.0
  * @link https://oxxx.cn
  *
  */
+if (!defined('__TYPECHO_ROOT_DIR__')) {
+	exit;
+}
 class TEPoster_Plugin implements Typecho_Plugin_Interface
 {
 	/**
@@ -19,6 +18,7 @@ class TEPoster_Plugin implements Typecho_Plugin_Interface
 	public static function activate()
 	{
 		Typecho_Plugin::factory('Widget_Archive')->footer = ['TEPoster_Plugin', 'footer'];
+		Helper::addAction('teposter-image', 'TEPoster_Action');
 		return _t('TEPoster 插件已启用');
 	}
 
@@ -27,6 +27,7 @@ class TEPoster_Plugin implements Typecho_Plugin_Interface
 	 */
 	public static function deactivate()
 	{
+		Helper::removeAction('teposter-image');
 		return _t('TEPoster 插件已禁用');
 	}
 
@@ -40,7 +41,7 @@ class TEPoster_Plugin implements Typecho_Plugin_Interface
 		);
 
 		$buttonClass = new Typecho_Widget_Helper_Form_Element_Text(
-			'buttonClass', null, 'teposter-btn', _t('按钮样式类名'), _t('用于套用主题现有的按钮样式。OneBlog 主题可填写 submit。')
+			'buttonClass', null, 'teposter-btn', _t('按钮样式类名'), _t('用于套用主题现有的按钮样式。OneBlog 主题已深度适配，无需填写类名。')
 		);
 
 		$posterWidth = new Typecho_Widget_Helper_Form_Element_Text(
@@ -60,7 +61,7 @@ class TEPoster_Plugin implements Typecho_Plugin_Interface
 		);
 
 		$defaultImageUrl = new Typecho_Widget_Helper_Form_Element_Text(
-			'defaultImageUrl', null, '', _t('默认图片地址'), _t('填写完整图片地址；留空则使用插件内置图片。远程图片需要允许跨域读取。')
+			'defaultImageUrl', null, '', _t('默认图片地址'), _t('填写完整图片地址；留空则使用插件内置图片。远程图片跨域失败时会尝试本站代理，服务器需启用 cURL。')
 		);
 
 		$customCoverField = new Typecho_Widget_Helper_Form_Element_Text(
@@ -519,6 +520,38 @@ TEPOSTER_ADMIN;
 		return $context;
 	}
 
+	private static function buildImageProxyMap(array $urls, $options)
+	{
+		$map = [];
+		$secret = isset($options->secret) ? (string)$options->secret : '';
+		$siteIndex = isset($options->index) ? rtrim((string)$options->index, '/') : '';
+		$siteParts = $siteIndex !== '' ? parse_url($siteIndex) : false;
+		if ($secret === '' || !$siteParts || empty($siteParts['scheme']) || empty($siteParts['host'])) {
+			return $map;
+		}
+
+		$sitePort = isset($siteParts['port']) ? (int)$siteParts['port'] : (strtolower($siteParts['scheme']) === 'https' ? 443 : 80);
+		$siteOrigin = strtolower($siteParts['scheme']) . '://' . strtolower($siteParts['host']) . ':' . $sitePort;
+		$actionUrl = Typecho_Common::url('/action/teposter-image', $siteIndex);
+
+		foreach ($urls as $url) {
+			$url = html_entity_decode(trim((string)$url), ENT_QUOTES, 'UTF-8');
+			$parts = $url !== '' ? parse_url($url) : false;
+			if (!$parts || empty($parts['scheme']) || empty($parts['host']) || !in_array(strtolower($parts['scheme']), ['http', 'https'], true)) {
+				continue;
+			}
+			$port = isset($parts['port']) ? (int)$parts['port'] : (strtolower($parts['scheme']) === 'https' ? 443 : 80);
+			$origin = strtolower($parts['scheme']) . '://' . strtolower($parts['host']) . ':' . $port;
+			if ($origin === $siteOrigin || isset($map[$url])) {
+				continue;
+			}
+			$token = hash_hmac('sha256', $url, $secret);
+			$map[$url] = $actionUrl . '?url=' . rawurlencode($url) . '&token=' . rawurlencode($token);
+		}
+
+		return $map;
+	}
+
 	public static function footer($archive = null)
 	{
 		$widget = ($archive instanceof Widget_Archive) ? $archive : Typecho_Widget::widget('Widget_Archive');
@@ -539,13 +572,16 @@ TEPOSTER_ADMIN;
 		if ($posterStyle === 'ninetheme') {
 			$posterStyle = 'nicetheme';
 		}
+		$defaultImage = !empty($pluginOptions->defaultImageUrl) ? (string)$pluginOptions->defaultImageUrl : ($pluginUrl . '/assets/poster.webp');
+		$logoUrl = !empty($pluginOptions->logoUrl) ? (string)$pluginOptions->logoUrl : '';
+		$imageProxyMap = self::buildImageProxyMap([$postContext['cover'], $defaultImage, $logoUrl], $options);
 
 		$cfg = [
 			'posterWidth' => isset($pluginOptions->posterWidth) ? intval($pluginOptions->posterWidth) : 400,
 			// 兼容旧版 qrSize：如存在则作为两者的后备
 			'qrSizeDefault' => isset($pluginOptions->qrSizeDefault) ? intval($pluginOptions->qrSizeDefault) : (isset($pluginOptions->qrSize) ? intval($pluginOptions->qrSize) : 130),
 			'qrSizeNinetheme' => isset($pluginOptions->qrSizeNinetheme) ? intval($pluginOptions->qrSizeNinetheme) : (isset($pluginOptions->qrSize) ? intval($pluginOptions->qrSize) : 75),
-			'logoUrl' => !empty($pluginOptions->logoUrl) ? (string)$pluginOptions->logoUrl : '',
+			'logoUrl' => $logoUrl,
 			'unsplashKeywords' => !empty($pluginOptions->unsplashKeywords) ? (string)$pluginOptions->unsplashKeywords : '',
 			'unsplashAccessKey' => !empty($pluginOptions->unsplashAccessKey) ? (string)$pluginOptions->unsplashAccessKey : '',
 			'postCustomCover' => $postContext['cover'],
@@ -557,8 +593,9 @@ TEPOSTER_ADMIN;
 			'minimalIdentity' => !empty($pluginOptions->minimalIdentity) ? (string)$pluginOptions->minimalIdentity : 'site',
 			'siteTitle' => isset($options->title) ? (string)$options->title : '',
 			'ntBrandDesc' => !empty($pluginOptions->ntBrandDesc) ? (string)$pluginOptions->ntBrandDesc : '',
+			'imageProxyMap' => $imageProxyMap,
 			'assetsBase' => $pluginUrl . '/assets',
-			'defaultImage' => !empty($pluginOptions->defaultImageUrl) ? (string)$pluginOptions->defaultImageUrl : ($pluginUrl . '/assets/poster.webp'),
+			'defaultImage' => $defaultImage,
 			'cdnHtml2canvasUrl' => $cdnHtml2canvasUrl,
 			'cdnQrcodeUrl' => $cdnQrcodeUrl,
 			'localHtml2canvasUrl' => $localHtml2canvasUrl,
@@ -566,13 +603,13 @@ TEPOSTER_ADMIN;
 			'assetSource' => $assetSource,
 		];
 
-		echo '<link rel="stylesheet" href="' . $cfg['assetsBase'] . '/teposter.css?v=24" />' . "\n";
+		echo '<link rel="stylesheet" href="' . $cfg['assetsBase'] . '/teposter.css?v=25" />' . "\n";
 		if (!empty($pluginOptions->customCss)) {
 			$customCss = preg_replace('/<\\/style/i', '<\\/style', (string)$pluginOptions->customCss);
 			echo '<style id="teposter-custom-css">' . $customCss . '</style>' . "\n";
 		}
 
 		echo '<script>window.TEPosterConfig = ' . json_encode($cfg, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) . ';</script>' . "\n";
-		echo '<script src="' . $cfg['assetsBase'] . '/teposter.js?v=31"></script>' . "\n";
+		echo '<script src="' . $cfg['assetsBase'] . '/teposter.js?v=32"></script>' . "\n";
 	}
 }
