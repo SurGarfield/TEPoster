@@ -249,9 +249,17 @@
 
 .teposter-logo {
   max-width: 180px;
-  height: 30px;
+  max-height: 30px;
+  height: auto;
   width: auto;
   object-fit: contain;
+}
+
+.teposter-logo-title {
+  color: #343a40;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.4;
 }
 
 .teposter-random {
@@ -371,7 +379,7 @@
 
 /* progress bar removed to avoid interfering with site header */
 
-/* ninetheme layout */
+/* NiceTheme layout */
 .teposter-nt {
   background: #f5f6f7;
   color: #181c20;
@@ -483,16 +491,11 @@
   align-items: center;
 }
 
-.teposter-nt .nt-brand-name {
-  font-size: 26px;
-  font-weight: 800;
-}
-
 .teposter-nt .nt-brand-desc {
-  margin-top: 7px;
+  margin-top: 6px;
   color: #697078;
   font-size: 13px;
-  line-height: 1.5;
+  line-height: 1.4;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -500,7 +503,11 @@
 }
 
 .teposter-nt .nt-brand {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
   min-width: 0;
+  min-height: 75px;
   padding-right: 12px;
 }
 
@@ -517,10 +524,19 @@
 
 .teposter-nt .nt-brand-logo {
   display: block;
-  max-width: 180px;
-  height: 34px;
+  max-width: 190px;
+  max-height: 32px;
+  height: auto;
   width: auto;
   object-fit: contain;
+}
+
+.teposter-nt .nt-footer-white.no-desc .nt-brand-logo {
+  max-height: 48px;
+}
+
+.teposter-nt .nt-footer-white.no-desc .nt-brand-title {
+  font-size: 24px;
 }
 
 .teposter-nt .nt-brand-title {
@@ -668,7 +684,8 @@
 .teposter-netease .netease-logo {
   display: block;
   max-width: 168px;
-  height: 26px;
+  max-height: 26px;
+  height: auto;
   width: auto;
   object-fit: contain;
 }

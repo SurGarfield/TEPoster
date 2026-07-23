@@ -19,6 +19,11 @@
     if (cls) el.className = cls;
     return el;
   }
+  function clampInteger(value, fallback, min, max) {
+    var parsed = parseInt(value, 10);
+    if (!Number.isFinite(parsed)) parsed = fallback;
+    return Math.max(min, Math.min(max, parsed));
+  }
   function showToast(message, ms) {
     var toast = $('.teposter-toast');
     if (!toast) {
@@ -182,7 +187,7 @@
   }
 
   function previewStyleName(style) {
-    if (style === 'ninetheme') return 'ninetheme';
+    if (style === 'nicetheme' || style === 'ninetheme') return 'NiceTheme';
     if (style === 'netease') return '网易云';
     if (style === 'minimal') return '深色卡片';
     return '默认样式';
@@ -199,7 +204,7 @@
     var ratio = naturalWidth / Math.max(1, naturalHeight);
     var viewportWidth = document.documentElement.clientWidth || window.innerWidth || 400;
     var viewportHeight = document.documentElement.clientHeight || window.innerHeight || 720;
-    var preferredWidth = style === 'minimal' ? 430 : (style === 'netease' ? 410 : (style === 'ninetheme' ? 390 : 400));
+    var preferredWidth = style === 'minimal' ? 430 : (style === 'netease' ? 410 : ((style === 'nicetheme' || style === 'ninetheme') ? 390 : 400));
     var maxImageWidth = Math.max(120, viewportWidth - 64);
     var maxImageHeight = Math.max(120, viewportHeight - 184);
     var previewWidth = Math.max(96, Math.min(preferredWidth, maxImageWidth, maxImageHeight * ratio));
@@ -624,6 +629,115 @@
     return img.getAttribute('src') || '';
   }
 
+  function resolveCoverElementCandidate(element) {
+    if (!element) return '';
+    if (String(element.tagName || '').toLowerCase() === 'img') {
+      return resolveImgCandidate(element);
+    }
+    var attrOrder = ['data-original', 'data-src', 'data-lazy-src', 'data-background', 'data-bg'];
+    for (var i = 0; i < attrOrder.length; i++) {
+      var value = element.getAttribute(attrOrder[i]);
+      if (value && value.trim()) return value;
+    }
+    var background = '';
+    try { background = element.style.backgroundImage || getComputedStyle(element).backgroundImage || ''; } catch (_) { }
+    var match = background.match(/^url(["']?(.*?)["']?)$/i);
+    return match ? match[1] : '';
+  }
+
+  function findThemeCoverCandidates() {
+    var selectors = [
+      '.post_thumb .post_bg',
+      '.post-thumb .post-bg',
+      '.post-cover img',
+      '.article-cover img',
+      '.entry-cover img',
+      '[data-post-cover]',
+      '[data-cover]'
+    ];
+    var candidates = [];
+    var seen = Object.create(null);
+    for (var i = 0; i < selectors.length; i++) {
+      var elements = [];
+      try { elements = document.querySelectorAll(selectors[i]); } catch (_) { }
+      for (var j = 0; j < elements.length; j++) {
+        var normalized = normalizeUrlMaybe(resolveCoverElementCandidate(elements[j]));
+        if (!normalized || isDecorationUrl(normalized) || seen[normalized]) continue;
+        seen[normalized] = true;
+        candidates.push(normalized);
+      }
+    }
+    return candidates;
+  }
+
+  function rasterizeSvgBrand(img) {
+    return new Promise(function (resolve) {
+      try {
+        var width = Math.max(1, img.naturalWidth || 0);
+        var height = Math.max(1, img.naturalHeight || 0);
+        var scale = Math.min(4, 1600 / Math.max(width, height));
+        var canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(width * scale));
+        canvas.height = Math.max(1, Math.round(height * scale));
+        var context = canvas.getContext('2d');
+        if (!context) return resolve(false);
+        context.drawImage(img, 0, 0, canvas.width, canvas.height);
+        var dataUrl = canvas.toDataURL('image/png');
+        img.onload = function () { resolve(img.naturalWidth > 0 && img.naturalHeight > 0); };
+        img.onerror = function () { resolve(false); };
+        img.removeAttribute('crossorigin');
+        img.src = dataUrl;
+        if (img.complete) setTimeout(img.onload, 0);
+      } catch (_) {
+        resolve(false);
+      }
+    });
+  }
+
+  function prepareBrandImage(img, url, fallbackNode) {
+    var candidates = getSameSiteUploadCandidates(url);
+    return new Promise(function (resolve) {
+      function useFallback() {
+        if (img && img.parentNode && fallbackNode) {
+          img.parentNode.replaceChild(fallbackNode, img);
+        }
+        resolve();
+      }
+      function loadNext(index) {
+        if (!img || index >= candidates.length) return useFallback();
+        var candidate = candidates[index];
+        var settled = false;
+        var rasterizing = false;
+        var timer = null;
+        function finish(loaded) {
+          if (settled) return;
+          settled = true;
+          if (timer) clearTimeout(timer);
+          img.onload = null;
+          img.onerror = null;
+          if (loaded) return resolve();
+          loadNext(index + 1);
+        }
+        img.onload = function () {
+          var loaded = img.naturalWidth > 0 && img.naturalHeight > 0;
+          if (!loaded) return finish(false);
+          if (/\.svg(?:[?#]|$)/i.test(candidate) && !rasterizing) {
+            rasterizing = true;
+            return rasterizeSvgBrand(img).then(finish);
+          }
+          if (!rasterizing) finish(true);
+        };
+        img.onerror = function () { finish(false); };
+        timer = setTimeout(function () { finish(false); }, 2600);
+        setImageCorsMode(img, candidate);
+        img.referrerPolicy = 'no-referrer';
+        img.src = candidate;
+        if (img.complete) setTimeout(img.onload, 0);
+      }
+      loadNext(0);
+    });
+  }
+
   function findContentImageCandidates() {
     var containerSelectors = [
       '.post-content',
@@ -737,6 +851,7 @@
       }
 
       enqueue(cfg.postCustomCover);
+      findThemeCoverCandidates().forEach(function (url) { enqueue(url); });
       findContentImageCandidates().forEach(function (url) { enqueue(url); });
       enqueue(getMeta('og:image', true) || getMeta('twitter:image', true));
       enqueue(defaultUrl, true, true);
@@ -778,21 +893,25 @@
   }
 
   function buildPosterDomDefault(data) {
-    var width = Math.max(240, parseInt(cfg.posterWidth || 400, 10));
+    var width = clampInteger(cfg.posterWidth, 400, 240, 1200);
     var staging = createEl('div', 'teposter-staging');
 
     var root = createEl('div', 'teposter-root teposter-default');
     root.style.width = width + 'px';
 
+    var header = createEl('div', 'teposter-header');
+    var logoTitle = createEl('div', 'teposter-logo-title');
+    logoTitle.textContent = cleanSiteTitle(cfg.siteTitle);
+    var brandReadyPromise = Promise.resolve();
     if (cfg.logoUrl) {
-      var header = createEl('div', 'teposter-header');
       var logoImg = createEl('img', 'teposter-logo');
-      logoImg.src = cfg.logoUrl;
-      logoImg.alt = 'logo';
-      logoImg.crossOrigin = 'anonymous';
+      logoImg.alt = cleanSiteTitle(cfg.siteTitle);
       header.appendChild(logoImg);
-      root.appendChild(header);
+      brandReadyPromise = prepareBrandImage(logoImg, cfg.logoUrl, logoTitle);
+    } else {
+      header.appendChild(logoTitle);
     }
+    root.appendChild(header);
 
     var content = createEl('div', 'teposter-content');
     var title = createEl('div', 'teposter-title');
@@ -835,7 +954,7 @@
     // QR code (bottom centered)
     var qrWrap = createEl('div', 'teposter-qrcode');
     var sizeDefault = (typeof cfg.qrSizeDefault !== 'undefined') ? parseInt(cfg.qrSizeDefault, 10) : 130;
-    var qrSizeInline = Math.max(40, sizeDefault || 130);
+    var qrSizeInline = clampInteger(sizeDefault, 130, 40, Math.min(400, width - 48));
     try { qrWrap.style.width = qrSizeInline + 'px'; qrWrap.style.height = qrSizeInline + 'px'; } catch (_) { }
 
     content.appendChild(title);
@@ -850,7 +969,7 @@
     // Generate QR
     try {
       // eslint-disable-next-line no-undef
-      var size = Math.max(40, sizeDefault || 130);
+      var size = qrSizeInline;
       new QRCode(qrWrap, {
         text: data.url,
         width: size,
@@ -863,12 +982,12 @@
       console.error('QRCode error', e);
     }
 
-    return { staging: staging, root: root, ready: Promise.resolve(imageReadyPromise) };
+    return { staging: staging, root: root, ready: Promise.all([imageReadyPromise, brandReadyPromise]) };
   }
 
-  // Build ninetheme poster layout (hero background on upper half)
-  function buildPosterDomNinetheme(data) {
-    var width = Math.max(240, parseInt(cfg.posterWidth || 400, 10));
+  // Build NiceTheme poster layout (hero background on upper half)
+  function buildPosterDomNicetheme(data) {
+    var width = clampInteger(cfg.posterWidth, 400, 240, 1200);
     var staging = createEl('div', 'teposter-staging');
 
     var root = createEl('div', 'teposter-root teposter-nt');
@@ -922,14 +1041,14 @@
     var brand = createEl('div', 'nt-brand');
     var brandRow = createEl('div', 'nt-brand-row');
     var logoOrTitle;
+    var brandTitleFallback = createEl('div', 'nt-brand-title');
+    brandTitleFallback.textContent = cleanSiteTitle(cfg.siteTitle);
+    var brandReadyPromise = Promise.resolve();
     if (cfg.logoUrl && String(cfg.logoUrl).length > 0) {
       logoOrTitle = createEl('img', 'nt-brand-logo');
-      logoOrTitle.src = cfg.logoUrl;
-      logoOrTitle.alt = cfg.siteTitle || 'logo';
-      logoOrTitle.crossOrigin = 'anonymous';
+      logoOrTitle.alt = cleanSiteTitle(cfg.siteTitle);
     } else {
-      logoOrTitle = createEl('div', 'nt-brand-title');
-      logoOrTitle.textContent = cfg.siteTitle || '';
+      logoOrTitle = brandTitleFallback;
     }
     var brandDesc = createEl('div', 'nt-brand-desc');
     var descText = String(cfg.ntBrandDesc || '').trim();
@@ -937,6 +1056,9 @@
       brandDesc.textContent = descText;
     }
     brandRow.appendChild(logoOrTitle);
+    if (cfg.logoUrl && logoOrTitle.tagName === 'IMG') {
+      brandReadyPromise = prepareBrandImage(logoOrTitle, cfg.logoUrl, brandTitleFallback);
+    }
     brand.appendChild(brandRow);
     if (descText.length > 0) {
       brand.appendChild(brandDesc);
@@ -945,7 +1067,7 @@
     }
     var qrWrap = createEl('div', 'nt-qrcode');
     var sizeNine = (typeof cfg.qrSizeNinetheme !== 'undefined') ? parseInt(cfg.qrSizeNinetheme, 10) : 75;
-    var qrSizeInline = Math.max(30, sizeNine || 75);
+    var qrSizeInline = clampInteger(sizeNine, 75, 30, Math.min(240, Math.floor(width * 0.32)));
     try { qrWrap.style.width = qrSizeInline + 'px'; qrWrap.style.height = qrSizeInline + 'px'; } catch (_) { }
     footer.appendChild(brand);
     footer.appendChild(qrWrap);
@@ -956,16 +1078,16 @@
 
     // QR code
     try {
-      var size = Math.max(30, sizeNine || 75);
+      var size = qrSizeInline;
       new QRCode(qrWrap, { text: data.url, width: size, height: size, colorDark: '#000', colorLight: '#fff', correctLevel: QRCode.CorrectLevel.M });
     } catch (e) { console.error('QRCode error', e); }
 
-    return { staging: staging, root: root, ready: Promise.resolve(imageReadyPromise) };
+    return { staging: staging, root: root, ready: Promise.all([imageReadyPromise, brandReadyPromise]) };
   }
 
   // Build Netease poster layout
   function buildPosterDomNetease(data) {
-    var width = Math.max(240, parseInt(cfg.posterWidth || 400, 10));
+    var width = clampInteger(cfg.posterWidth, 400, 240, 1200);
     var staging = createEl('div', 'teposter-staging');
 
     var root = createEl('div', 'teposter-root teposter-netease');
@@ -1039,17 +1161,17 @@
     // Left
     var footerLeft = createEl('div', 'netease-footer-left');
     var brandRow = createEl('div', 'netease-brand-row');
+    var brandReadyPromise = Promise.resolve();
+    var siteName = createEl('span', 'netease-site-name');
+    siteName.textContent = cleanSiteTitle(cfg.siteTitle);
 
     // Keep the configured logo treatment, with a clean site title as fallback.
     if (cfg.logoUrl) {
       var logo = createEl('img', 'netease-logo');
-      logo.src = cfg.logoUrl;
       logo.alt = cleanSiteTitle(cfg.siteTitle);
-      logo.crossOrigin = 'anonymous';
       brandRow.appendChild(logo);
+      brandReadyPromise = prepareBrandImage(logo, cfg.logoUrl, siteName);
     } else {
-      var siteName = createEl('span', 'netease-site-name');
-      siteName.textContent = cleanSiteTitle(cfg.siteTitle);
       brandRow.appendChild(siteName);
     }
 
@@ -1089,7 +1211,7 @@
       console.error('QRCode error', e);
     }
 
-    return { staging: staging, root: root, ready: Promise.resolve(imageReadyPromise) };
+    return { staging: staging, root: root, ready: Promise.all([imageReadyPromise, brandReadyPromise]) };
   }
 
   function getSiteFaviconUrl() {
@@ -1099,10 +1221,13 @@
     for (var i = 0; i < links.length; i++) {
       var rel = String(links[i].getAttribute('rel') || '').toLowerCase();
       var relTokens = rel.split(/\s+/);
-      if (relTokens.indexOf('icon') === -1) continue;
+      var isIcon = relTokens.indexOf('icon') !== -1;
+      var isAppleTouchIcon = relTokens.indexOf('apple-touch-icon') !== -1
+        || relTokens.indexOf('apple-touch-icon-precomposed') !== -1;
+      if (!isIcon && !isAppleTouchIcon) continue;
       var href = normalizeUrlMaybe(links[i].getAttribute('href'));
       if (!href) continue;
-      var score = relTokens.indexOf('shortcut') !== -1 ? 1000 : 900;
+      var score = isIcon ? (relTokens.indexOf('shortcut') !== -1 ? 1000 : 900) : 800;
       var sizes = String(links[i].getAttribute('sizes') || '');
       var match = sizes.match(/(\d+)x(\d+)/i);
       if (match) score += Math.max(parseInt(match[1], 10), parseInt(match[2], 10));
@@ -1113,6 +1238,14 @@
       }
     }
     return bestUrl;
+  }
+
+  function getRootFaviconUrl() {
+    try {
+      return new URL('/favicon.ico', location.origin).href;
+    } catch (_) {
+      return '';
+    }
   }
 
   function cleanSiteTitle(title) {
@@ -1138,7 +1271,7 @@
   }
 
   function buildPosterDomMinimal(data) {
-    var width = Math.max(240, parseInt(cfg.posterWidth || 400, 10));
+    var width = clampInteger(cfg.posterWidth, 400, 240, 1200);
     var staging = createEl('div', 'teposter-staging');
     var root = createEl('div', 'teposter-root teposter-minimal');
     root.style.width = width + 'px';
@@ -1215,6 +1348,7 @@
       appendIdentityCandidates(cfg.postAuthorAvatar, 'avatar');
     } else {
       appendIdentityCandidates(getSiteFaviconUrl(), 'favicon');
+      appendIdentityCandidates(getRootFaviconUrl(), 'favicon');
     }
 
     var faviconReadyPromise = new Promise(function (resolve) {
@@ -1283,8 +1417,8 @@
       var data = { title: pageTitle, summary: summary, url: location.href };
 
       var dom;
-      if (cfg.posterStyle === 'ninetheme') {
-        dom = buildPosterDomNinetheme(data);
+      if (cfg.posterStyle === 'nicetheme' || cfg.posterStyle === 'ninetheme') {
+        dom = buildPosterDomNicetheme(data);
       } else if (cfg.posterStyle === 'netease') {
         dom = buildPosterDomNetease(data);
       } else if (cfg.posterStyle === 'minimal') {
@@ -1370,8 +1504,6 @@
     return generatePoster._p;
   }
 
-  // auto insert removed
-
   function prewarmDeps() {
     if (prewarmDeps._started) return prewarmDeps._p || Promise.resolve();
     prewarmDeps._started = true;
@@ -1391,8 +1523,6 @@
       fn();
     }
   }
-
-  // removed persistent progress bar to avoid theme conflicts
 
   function bindPrewarmOnce() {
     if (window.__TEPosterPrewarmBoundV1) return;
